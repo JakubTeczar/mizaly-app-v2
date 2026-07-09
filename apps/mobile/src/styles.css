@@ -479,6 +479,90 @@ a {
   border-style: dashed;
 }
 
+/* ---------- Form sections (post composer grouping) ---------- */
+
+.form-section {
+  padding-top: 18px;
+  margin-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.form-section-first {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
+}
+
+.form-section-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+/* Same disclosure pattern as .collapsible-card, but sized to sit inside an
+   existing card instead of being one - no outer shadow/full-card padding. */
+.collapsible-inline {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 4px 0 18px;
+}
+
+.collapsible-inline .collapsible-toggle {
+  padding: 12px 14px;
+  font-size: 14px;
+}
+
+.collapsible-inline .collapsible-body {
+  padding: 4px 14px 14px;
+}
+
+/* ---------- Field label + tap-to-reveal info hint ---------- */
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.info-tip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.info-tip-trigger[aria-expanded="true"] {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-tint);
+}
+
+.info-tip-bubble {
+  display: block;
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 /* ---------- Tworzenie hub ---------- */
 
 .tworzenie-hub {

@@ -31,6 +31,28 @@ interface PublishResponse {
   zernio: { status: string; platforms: { platform: string; accountId: string; status: string }[] };
 }
 
+// Small tap-to-reveal info affordance for explanatory copy that doesn't need
+// to sit permanently under a field - this is a touch device (mobile PWA), so
+// a hover-only `title` tooltip would never be reachable, hence the explicit
+// toggle button instead. Purely presentational, no effect on form state.
+function InfoTip({ text }: { text: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="info-tip-trigger"
+        aria-expanded={isOpen}
+        aria-label="Więcej informacji"
+        onClick={() => setIsOpen((prev) => !prev)}
+      >
+        i
+      </button>
+      {isOpen && <span className="info-tip-bubble">{text}</span>}
+    </>
+  );
+}
+
 export function PostSection() {
   const [heading, setHeading] = useState("");
   const [content, setContent] = useState("");
@@ -78,6 +100,12 @@ export function PostSection() {
   // publish time, never saved on the post itself.
   const [storyTemplate, setStoryTemplate] = useState<StoryTemplate>("none");
   const [seriesName, setSeriesName] = useState("");
+
+  // Collapsed by default, same reasoning as the AI section above - first
+  // comment and story template are secondary, occasional choices, not part
+  // of the core "write and publish" path, so they shouldn't take up space
+  // on entry.
+  const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
 
   // Auto-regenerated (debounced) whenever the template or its inputs change -
   // see the effect below. templatePreviewRequestId guards against an older,
@@ -553,151 +581,187 @@ export function PostSection() {
       <section className="card">
         <h2>Stwórz posta social media</h2>
         <form onSubmit={handleSaveDraft}>
-          <div className="field">
-            <label htmlFor="heading">Tytuł</label>
-            <input id="heading" type="text" value={heading} onChange={(e) => setHeading(e.target.value)} required />
+          <div className="form-section form-section-first">
+            <p className="form-section-title">Treść posta</p>
+            <div className="field">
+              <label htmlFor="heading">Tytuł</label>
+              <input id="heading" type="text" value={heading} onChange={(e) => setHeading(e.target.value)} required />
+            </div>
+
+            <div className="field">
+              <label htmlFor="content">Treść</label>
+              <textarea id="content" value={content} onChange={(e) => setContent(e.target.value)} required />
+            </div>
           </div>
 
-          <div className="field">
-            <label htmlFor="content">Treść</label>
-            <textarea id="content" value={content} onChange={(e) => setContent(e.target.value)} required />
-          </div>
-
-          <div className="field">
-            <label htmlFor="firstComment">Pierwszy komentarz</label>
-            <textarea
-              id="firstComment"
-              value={firstComment}
-              onChange={(e) => setFirstComment(e.target.value)}
-              placeholder="Opcjonalnie"
-            />
-            <p className="hint-text">
-              Działa tylko na Facebooku i LinkedIn. Instagram (i inne platformy) nie obsługuje automatycznego pierwszego komentarza.
-            </p>
-          </div>
-
-          <div className="field">
-            <label>Zdjęcia</label>
-            <label htmlFor="photos" className="photo-picker-button">
-              Dodaj zdjęcia
-            </label>
-            <input
-              id="photos"
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handlePhotosChange}
-              disabled={isUploadingPhotos}
-              style={{ display: "none" }}
-            />
-            <p className="hint-text">Zdjęcia o nietypowych proporcjach są automatycznie przycinane do formatu zgodnego z Instagramem.</p>
-            {isUploadingPhotos && <p className="hint-text">Wgrywanie zdjęć…</p>}
-            {uploadError && <p className="error-text">{uploadError}</p>}
-            {photoPreviews.length > 0 && (
-              <div className="photo-grid">
-                {photoPreviews.map((src, index) => (
-                  <div key={src} className="photo-thumb">
-                    <img src={src} alt="Podgląd zdjęcia" />
-                    <button
-                      type="button"
-                      className="photo-thumb-remove"
-                      aria-label="Usuń zdjęcie"
-                      onClick={() => handleRemovePhoto(index)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
+          <div className="form-section">
+            <p className="form-section-title">Zdjęcia</p>
+            <div className="field">
+              <div className="field-label-row">
+                <label>Zdjęcia</label>
+                <InfoTip text="Zdjęcia o nietypowych proporcjach są automatycznie przycinane do formatu zgodnego z Instagramem." />
               </div>
-            )}
-          </div>
-
-          <div className="field">
-            <label htmlFor="storyTemplate">Szablon relacji (Instagram Story)</label>
-            <select
-              id="storyTemplate"
-              value={storyTemplate}
-              onChange={(e) => {
-                setStoryTemplate(e.target.value as StoryTemplate);
-                setTemplatePreviewUrl(null);
-                setTemplatePreviewError(null);
-              }}
-            >
-              <option value="none">Brak (surowe zdjęcie)</option>
-              <option value="new_post">Nowy post</option>
-              <option value="series">Seria</option>
-            </select>
-            {storyTemplate === "series" && (
+              <label htmlFor="photos" className="photo-picker-button">
+                Dodaj zdjęcia
+              </label>
               <input
-                type="text"
-                value={seriesName}
-                onChange={(e) => setSeriesName(e.target.value)}
-                placeholder="Nazwa serii, np. Trening w domu #3"
+                id="photos"
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handlePhotosChange}
+                disabled={isUploadingPhotos}
+                style={{ display: "none" }}
               />
-            )}
-            <p className="hint-text">
-              Dotyczy tylko relacji publikowanej automatycznie na Instagramie razem z postem. Domyślnie to po
-              prostu to samo zdjęcie co w poście, bez żadnej grafiki.
-            </p>
+              {isUploadingPhotos && <p className="hint-text">Wgrywanie zdjęć…</p>}
+              {uploadError && <p className="error-text">{uploadError}</p>}
+              {photoPreviews.length > 0 && (
+                <div className="photo-grid">
+                  {photoPreviews.map((src, index) => (
+                    <div key={src} className="photo-thumb">
+                      <img src={src} alt="Podgląd zdjęcia" />
+                      <button
+                        type="button"
+                        className="photo-thumb-remove"
+                        aria-label="Usuń zdjęcie"
+                        onClick={() => handleRemovePhoto(index)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="field">
-            <label>Platformy</label>
-            {isLoadingAccounts ? (
-              <p className="hint-text">Ładowanie połączonych kont…</p>
-            ) : connectedPlatforms.length === 0 ? (
-              <p className="card-muted-text">
-                Nie masz jeszcze podłączonych kont. <Link to="/konta">Połącz konto</Link>, żeby móc publikować.
-              </p>
-            ) : (
-              <div>
-                {connectedPlatforms.map((platform) => (
-                  <span
-                    key={platform}
-                    className="tag-pill"
-                    style={{
-                      cursor: "pointer",
-                      background: platforms.includes(platform) ? "var(--color-primary)" : "var(--color-primary-tint)",
-                      color: platforms.includes(platform) ? "#fff" : "var(--color-primary)",
+          <div className="collapsible-inline">
+            <button
+              type="button"
+              className="collapsible-toggle"
+              aria-expanded={isMoreOptionsOpen}
+              onClick={() => setIsMoreOptionsOpen((prev) => !prev)}
+            >
+              <span>Więcej opcji (pierwszy komentarz, szablon relacji)</span>
+              <svg
+                className={`collapsible-chevron${isMoreOptionsOpen ? " open" : ""}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            {isMoreOptionsOpen && (
+              <div className="collapsible-body">
+                <div className="field">
+                  <div className="field-label-row">
+                    <label htmlFor="firstComment">Pierwszy komentarz</label>
+                    <InfoTip text="Działa tylko na Facebooku i LinkedIn. Instagram (i inne platformy) nie obsługuje automatycznego pierwszego komentarza." />
+                  </div>
+                  <textarea
+                    id="firstComment"
+                    value={firstComment}
+                    onChange={(e) => setFirstComment(e.target.value)}
+                    placeholder="Opcjonalnie"
+                  />
+                </div>
+
+                <div className="field">
+                  <div className="field-label-row">
+                    <label htmlFor="storyTemplate">Szablon relacji (Instagram Story)</label>
+                    <InfoTip text="Dotyczy tylko relacji publikowanej automatycznie na Instagramie razem z postem. Domyślnie to po prostu to samo zdjęcie co w poście, bez żadnej grafiki." />
+                  </div>
+                  <select
+                    id="storyTemplate"
+                    value={storyTemplate}
+                    onChange={(e) => {
+                      setStoryTemplate(e.target.value as StoryTemplate);
+                      setTemplatePreviewUrl(null);
+                      setTemplatePreviewError(null);
                     }}
-                    onClick={() => togglePlatform(platform)}
                   >
-                    {platform}
-                  </span>
-                ))}
+                    <option value="none">Brak (surowe zdjęcie)</option>
+                    <option value="new_post">Nowy post</option>
+                    <option value="series">Seria</option>
+                  </select>
+                  {storyTemplate === "series" && (
+                    <input
+                      type="text"
+                      value={seriesName}
+                      onChange={(e) => setSeriesName(e.target.value)}
+                      placeholder="Nazwa serii, np. Trening w domu #3"
+                    />
+                  )}
+                </div>
               </div>
             )}
           </div>
 
-          {submitError && <p className="error-text">{submitError}</p>}
-          {successMessage && <p className="hint-text success">{successMessage}</p>}
-          {!canPublish && connectedPlatforms.length > 0 && platforms.length === 0 && (
-            <p className="hint-text">Wybierz co najmniej jedną platformę powyżej, żeby móc zaplanować lub opublikować post.</p>
-          )}
-          {!canPublish && platforms.length > 0 && (
-            <p className="hint-text">Wśród wybranych platform jest taka bez podłączonego konta, więc publikacja od razu jest niedostępna.</p>
-          )}
+          <div className="form-section">
+            <p className="form-section-title">Platformy i publikacja</p>
+            <div className="field">
+              <label>Platformy</label>
+              {isLoadingAccounts ? (
+                <p className="hint-text">Ładowanie połączonych kont…</p>
+              ) : connectedPlatforms.length === 0 ? (
+                <p className="card-muted-text">
+                  Nie masz jeszcze podłączonych kont. <Link to="/konta">Połącz konto</Link>, żeby móc publikować.
+                </p>
+              ) : (
+                <div>
+                  {connectedPlatforms.map((platform) => (
+                    <span
+                      key={platform}
+                      className="tag-pill"
+                      style={{
+                        cursor: "pointer",
+                        background: platforms.includes(platform) ? "var(--color-primary)" : "var(--color-primary-tint)",
+                        color: platforms.includes(platform) ? "#fff" : "var(--color-primary)",
+                      }}
+                      onClick={() => togglePlatform(platform)}
+                    >
+                      {platform}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="submit" className="btn btn-secondary" disabled={isSubmitting || isUploadingPhotos}>
-              {isSubmitting ? "Zapisywanie…" : "Zapisz jako szkic"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={isSubmitting || isUploadingPhotos || !canPublish}
-              onClick={() => setIsScheduleModalOpen(true)}
-            >
-              Zaplanuj publikację
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={isSubmitting || isUploadingPhotos || !canPublish}
-              onClick={handlePublishNow}
-            >
-              {isSubmitting ? "Publikowanie…" : "Opublikuj teraz"}
-            </button>
+            {submitError && <p className="error-text">{submitError}</p>}
+            {successMessage && <p className="hint-text success">{successMessage}</p>}
+            {!canPublish && connectedPlatforms.length > 0 && platforms.length === 0 && (
+              <p className="hint-text">Wybierz co najmniej jedną platformę powyżej, żeby móc zaplanować lub opublikować post.</p>
+            )}
+            {!canPublish && platforms.length > 0 && (
+              <p className="note-banner">Wśród wybranych platform jest taka bez podłączonego konta, więc publikacja od razu jest niedostępna.</p>
+            )}
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="submit" className="btn btn-secondary" disabled={isSubmitting || isUploadingPhotos}>
+                {isSubmitting ? "Zapisywanie…" : "Zapisz jako szkic"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={isSubmitting || isUploadingPhotos || !canPublish}
+                onClick={() => setIsScheduleModalOpen(true)}
+              >
+                Zaplanuj publikację
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={isSubmitting || isUploadingPhotos || !canPublish}
+                onClick={handlePublishNow}
+              >
+                {isSubmitting ? "Publikowanie…" : "Opublikuj teraz"}
+              </button>
+            </div>
           </div>
         </form>
       </section>

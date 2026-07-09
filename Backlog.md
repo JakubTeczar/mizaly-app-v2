@@ -34,11 +34,18 @@ Ustalenia z researchu feasibility (2026-07-07):
 
 Panel "Stwórz posta social media" (`PostSection.tsx`) urósł organicznie (AI szybkie/dokładne, szablon relacji + nazwa serii, pierwszy komentarz z podpowiedzią, zdjęcia z podpowiedzią o przycinaniu, platformy, itd.) i robi się przeładowany — dużo etykiet/podpowiedzi na raz, łatwo się pogubić.
 
-- [ ] Przegląd całego formularza pod kątem hierarchii informacji — co użytkownik musi widzieć zawsze, a co może być domyślnie zwinięte/ukryte (np. za "Zaawansowane", collapsible, tooltipy zamiast stałego tekstu pod polem).
-- [ ] Rozważyć pogrupowanie sekcji (np. treść / media / dystrybucja) zamiast jednego długiego formularza.
-- [ ] Skrócić/ograniczyć liczbę stale widocznych `hint-text` — część z nich może być tooltipem albo pokazywać się tylko w kontekście (np. błędu, pierwszego użycia).
+- [x] Przegląd całego formularza pod kątem hierarchii informacji, co użytkownik musi widzieć zawsze, a co może być domyślnie zwinięte/ukryte (np. za "Zaawansowane", collapsible, tooltipy zamiast stałego tekstu pod polem).
+- [x] Rozważyć pogrupowanie sekcji (np. treść / media / dystrybucja) zamiast jednego długiego formularza.
+- [x] Skrócić/ograniczyć liczbę stale widocznych `hint-text`, część z nich może być tooltipem albo pokazywać się tylko w kontekście (np. błędu, pierwszego użycia).
 
-Kontekst: zgłoszone przy okazji dodawania kolejnych opcji (szablon relacji) do i tak już rozbudowanego formularza (2026-07-07) — świadomy sygnał, że panel potrzebuje uproszczenia, zanim dojdą kolejne funkcje (karuzele, punkt 2 powyżej).
+Kontekst: zgłoszone przy okazji dodawania kolejnych opcji (szablon relacji) do i tak już rozbudowanego formularza (2026-07-07), świadomy sygnał, że panel potrzebuje uproszczenia, zanim dojdą kolejne funkcje (karuzele, punkt 2 powyżej).
+
+Zaimplementowane (2026-07-09), tylko warstwa prezentacji w `PostSection.tsx` + `styles.css`, bez zmian w logice/API:
+- Formularz główny podzielony na trzy widoczne grupy oddzielone cienką linią i etykietą (`.form-section` / `.form-section-title`): "Treść posta" (Tytuł, Treść), "Zdjęcia" (upload zdjęć), "Platformy i publikacja" (wybór platform, przyciski akcji).
+- Mniej używane pola, pierwszy komentarz i szablon relacji (Instagram Story) wraz z nazwą serii, przeniesione do nowej zwijanej sekcji "Więcej opcji", domyślnie zwiniętej, dokładnie tym samym wzorcem `.collapsible-toggle`/`.collapsible-chevron`/`.collapsible-body` co istniejąca sekcja AI (nowy wariant kontenera `.collapsible-inline`, żeby nie zagnieżdżać pełnej karty w karcie).
+- Trzy stałe teksty wyjaśniające (o przycinaniu zdjęć, o wsparciu platform dla pierwszego komentarza, o zakresie szablonu relacji) zamienione na doraźny komponent `InfoTip`, mały przycisk "i" przy etykiecie pola, który po dotknięciu pokazuje tekst pod polem. Użyto przycisku zamiast `title`/hover, bo to mobilna PWA (dotyk, nie hover).
+- Ostrzeżenie blokujące publikację (platforma bez podłączonego konta) podniesione z szarego `hint-text` do `.note-banner` (żółty banner), żeby wyraźnie odróżnić od neutralnej podpowiedzi.
+- Bez zmian: logika stanu, wywołania `apiClient`, przepływ generowania AI (szybkie/dokładne), efekt debounce podglądu szablonu relacji, handlery zapisu/planowania/publikacji, upload zdjęć (pole pliku zostało poza jakąkolwiek zwijaną sekcją, żeby nie ryzykować problemów z file inputem).
 
 ## 4. Inspiracje: YouTube + Newslettery — dopięcie i weryfikacja
 
