@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mizaly-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mizaly
+      POSTGRES_PASSWORD: mizaly
+      POSTGRES_DB: mizaly
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  {{fontsTag}}
+  <style>{{css}}</style>
+</head>
+<body>
+<div class="story">
+
+  <!-- Background photo -->
+  <img class="bg-photo" src="{{photoSrc}}" alt="" />
+
+  <!-- Dark overlays for text legibility -->
+  <div class="overlay"></div>
+  <div class="bottom-overlay"></div>
+
+  <!-- Header: name + optional subtitle -->
+  <header class="header">
+    <div class="header__name">{{name}}</div>
+    {{subtitleBox}}
+  </header>
+
+  <!-- Main text -->
+  <div class="main-text">
+    <div class="main-text__label">{{label}}</div>
+    <div class="main-text__title">{{title}}</div>
+  </div>
+
+  {{descriptionBox}}
+
+</div>
+</body>
+</html>

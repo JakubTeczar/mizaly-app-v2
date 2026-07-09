@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+.env
+!.env.example
+*.log
+.DS_Store
+.vscode/
+coverage/
+
+# Prisma
+apps/backend/prisma/dev.db
+
+# PWA build artifacts
+apps/mobile/dist/
+apps/admin/dist/
+
+# Docker
+postgres-data/
+
+# Locally re-hosted scraped images (see apps/backend/src/lib/localImageStore.ts)
+apps/backend/storage/

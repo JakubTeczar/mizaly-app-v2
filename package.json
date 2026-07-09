@@ -1,0 +1,16 @@
+{
+  "name": "mizaly-app-v2",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:backend": "yarn workspace @mizaly/backend dev",
+    "dev:mobile": "yarn workspace @mizaly/mobile dev",
+    "dev:admin": "yarn workspace @mizaly/admin dev",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down"
+  }
+}

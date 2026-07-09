@@ -1,0 +1,303 @@
+// Prisma schema for Mizaly backend.
+// Mirrors the shapes/enum string values in packages/shared/src/index.ts —
+// keep the two in sync when the data model changes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  owner
+  member
+}
+
+enum SocialPlatform {
+  instagram
+  tiktok
+  youtube
+  x
+  linkedin
+  facebook
+  threads
+  pinterest
+  reddit
+  bluesky
+  whatsapp
+  telegram
+  discord
+  snapchat
+  google_business
+}
+
+enum ContentStatus {
+  draft
+  scheduled
+  published
+}
+
+enum MessageDirection {
+  inbound
+  outbound
+}
+
+model Organization {
+  id              String   @id @default(cuid())
+  name            String
+  // Zernio's own "profile" id (their MongoDB ObjectId) - Zernio requires a
+  // profile to exist before any social account can be connected to it, so
+  // we lazily create one per organization on first use. See src/integrations/zernio.ts.
+  zernioProfileId String?
+  // Free-text background an admin sets per client (e.g. "personal trainer,
+  // 10 years experience") so the AI post interview (routes/ai.ts) doesn't
+  // waste questions on things already known about this organization.
+  aiContext       String?
+  createdAt       DateTime @default(now())
+
+  users             User[]
+  socialAccounts    SocialAccount[]
+  posts             Post[]
+  reels             Reel[]
+  websiteArticles   WebsiteArticle[]
+  inspirationItems  InspirationItem[]
+  conversations     Conversation[]
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  email          String   @unique
+  passwordHash   String
+  role           UserRole @default(owner)
+  createdAt      DateTime @default(now())
+
+  // Which configured ZERNIO_API_KEY (env-based, see
+  // src/integrations/zernioApiKeys.ts) this user's Zernio calls are made
+  // with. Zernio caps each key at 2 connected accounts, so admins assign
+  // keys per user manually. Null falls back to the legacy unsuffixed
+  // ZERNIO_API_KEY ("1"). Free-text id, not a foreign key - the set of valid
+  // ids is whatever's configured in env at runtime, not stored in the DB.
+  zernioApiKeyId String?
+
+  @@index([organizationId])
+}
+
+// Fully separate auth realm from Organization/User - internal admin panel only.
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model SocialAccount {
+  id              String         @id @default(cuid())
+  organizationId  String
+  organization    Organization   @relation(fields: [organizationId], references: [id])
+  platform        SocialPlatform
+  zernioAccountId String
+  displayName     String
+  accessToken     String?
+  refreshToken    String?
+  connectedAt     DateTime       @default(now())
+
+  conversations Conversation[]
+
+  @@unique([organizationId, zernioAccountId])
+  @@index([organizationId])
+}
+
+model Post {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  heading        String
+  content        String           @db.Text
+  firstComment   String?
+  mediaUrls      String[]
+  platforms      SocialPlatform[]
+  status         ContentStatus    @default(draft)
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  createdAt      DateTime         @default(now())
+
+  // Set once the post has actually been sent to Zernio (see
+  // src/routes/posts.ts publish endpoint and src/integrations/zernio.ts).
+  zernioPostId  String?
+  publishError  String?
+
+  websiteArticles WebsiteArticle[]
+
+  @@index([organizationId])
+}
+
+model Reel {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  title          String
+  description    String           @db.Text
+  videoUrl       String
+  platforms      SocialPlatform[]
+  status         ContentStatus    @default(draft)
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  createdAt      DateTime         @default(now())
+
+  @@index([organizationId])
+}
+
+model WebsiteArticle {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  title          String
+  body           String        @db.Text
+  sourcePostId   String?
+  sourcePost     Post?         @relation(fields: [sourcePostId], references: [id])
+  status         ContentStatus @default(draft)
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId])
+}
+
+model InspirationItem {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  sourceUrl      String?
+  content        String       @db.Text
+  tags           String[]
+  note           String?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+}
+
+model Conversation {
+  id              String         @id @default(cuid())
+  organizationId  String
+  organization    Organization   @relation(fields: [organizationId], references: [id])
+  socialAccountId String
+  socialAccount   SocialAccount  @relation(fields: [socialAccountId], references: [id])
+  platform        SocialPlatform
+  participantName String
+  lastMessageAt   DateTime       @updatedAt
+
+  messages Message[]
+
+  @@index([organizationId])
+}
+
+model Message {
+  id             String            @id @default(cuid())
+  conversationId String
+  conversation   Conversation      @relation(fields: [conversationId], references: [id])
+  direction      MessageDirection
+  body           String            @db.Text
+  createdAt      DateTime          @default(now())
+
+  @@index([conversationId])
+}
+
+// Instagram posts scraped by the every-2-days Apify job (see
+// src/jobs/inspirationScrapeJob.ts). Global, not organization-scoped - the
+// watched account list is a hardcoded global for now (ROADMAP: make it
+// per-tenant later). `id` is Instagram's own post id, so re-scrapes upsert
+// and refresh engagement counts instead of duplicating rows.
+model ScrapedInstagramPost {
+  id             String    @id
+  username       String
+  url            String
+  type           String
+  caption        String    @db.Text
+  imageUrl       String
+  likesCount     Int       @default(0)
+  commentsCount  Int       @default(0)
+  videoViewCount Int?
+  postedAt       DateTime?
+  scrapedAt      DateTime  @default(now())
+
+  @@index([username])
+}
+
+// AI-generated engagement analysis of the scraped posts, produced at the end
+// of each scrape job run. The newest row is what the app shows.
+model InspirationAnalysis {
+  id        String   @id @default(cuid())
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+}
+
+// Instagram accounts watched by the scrape job - editable from the
+// Inspiracje > Instagram tab. Global list, same rationale as
+// ScrapedInstagramPost (see comment there): per-tenant config is a later step.
+model WatchedInstagramAccount {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  createdAt DateTime @default(now())
+}
+
+// YouTube channels watched by the scrape job - editable from the
+// Inspiracje > YouTube tab. `handle` is the "@name" part of the channel URL.
+model WatchedYoutubeChannel {
+  id          String   @id @default(cuid())
+  handle      String   @unique
+  displayName String?
+  createdAt   DateTime @default(now())
+}
+
+// Videos scraped from watched channels (see src/jobs/youtubeScrapeJob.ts and
+// src/integrations/youtube.ts). `id` is YouTube's own video id, so re-scrapes
+// upsert and refresh engagement counts instead of duplicating rows.
+model ScrapedYoutubeVideo {
+  id            String    @id
+  channelHandle String
+  title         String    @db.Text
+  thumbnailUrl  String
+  viewCount     Int       @default(0)
+  likeCount     Int       @default(0)
+  commentCount  Int       @default(0)
+  durationSec   Int?
+  transcript    String?   @db.Text
+  publishedAt   DateTime?
+  scrapedAt     DateTime  @default(now())
+
+  comments ScrapedYoutubeComment[]
+
+  @@index([channelHandle])
+}
+
+model ScrapedYoutubeComment {
+  id        String   @id
+  videoId   String
+  video     ScrapedYoutubeVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  author    String
+  text      String   @db.Text
+  likeCount Int      @default(0)
+  postedAt  DateTime?
+
+  @@index([videoId])
+}
+
+// Newsletters pulled from the shared inbox via IMAP (see
+// src/integrations/mail.ts and src/jobs/newsletterFetchJob.ts). Read-only in
+// the UI - no per-source "watch list" management, it's a single fixed mailbox.
+model NewsletterEmail {
+  id          String   @id @default(cuid())
+  messageId   String   @unique
+  subject     String   @db.Text
+  fromName    String?
+  fromAddress String?
+  receivedAt  DateTime
+  bodyHtml    String?  @db.Text
+  bodyText    String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  @@index([receivedAt])
+}

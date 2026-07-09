@@ -1,0 +1,136 @@
+/* --- Reset --- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 1080px;
+  height: 1920px;
+  overflow: hidden;
+  background: #111;
+}
+
+/* --- Story wrapper --- */
+.story {
+  width: 1080px;
+  height: 1920px;
+  position: relative;
+  overflow: hidden;
+  font-family: 'Gantari', Arial, sans-serif;
+}
+
+/* --- Background photo --- */
+.bg-photo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- Dark overlays --- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  height: 722px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.58) 70%, rgba(0, 0, 0, 0) 100%);
+}
+
+.bottom-overlay {
+  background: linear-gradient(to top, #000000 0%, rgba(0, 0, 0, 0) 100%);
+  width: 100%;
+  height: 620px;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+}
+
+/* --- Header --- */
+.header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 220px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 55px;
+  z-index: 10;
+}
+
+.header__name {
+  font-size: 52px;
+  color: #1a1a1a;
+  line-height: 1;
+  font-family: 'Gantari', sans-serif;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-align: center;
+}
+
+.header__subtitle {
+  font-size: 34px;
+  color: #b8860b;
+  line-height: 1;
+  font-family: 'Gantari', sans-serif;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-align: center;
+}
+
+/* --- Main text --- */
+.main-text {
+  position: absolute;
+  top: 336px;
+  left: 60px;
+  right: 60px;
+}
+
+.main-text__label {
+  font-size: 96px;
+  font-weight: 400;
+  color: #ffffff;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  font-family: 'Bebas Neue', sans-serif;
+  text-shadow: 8px 8px 27.7px rgba(0, 0, 0, 0.4);
+}
+
+.main-text__title {
+  font-size: 112px;
+  font-weight: 400;
+  color: #ffffff;
+  line-height: 1.05;
+  font-family: 'Bebas Neue', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 2%;
+  margin-top: -12px;
+  text-shadow: 8px 8px 27.7px rgba(0, 0, 0, 0.4);
+}
+
+/* --- Description box --- */
+.description {
+  position: absolute;
+  bottom: 90px;
+  left: 60px;
+  right: 60px;
+  background: rgba(0, 0, 0, 0.58);
+  border-radius: 22px;
+  padding: 32px 42px;
+}
+
+.description__text {
+  font-size: 40px;
+  color: #ffffff;
+  line-height: 1.5;
+  font-weight: 400;
+  font-family: 'Gantari', sans-serif;
+}
