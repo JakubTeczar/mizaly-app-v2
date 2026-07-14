@@ -3,7 +3,7 @@ import { defineRailway, github, postgres, preserve, project, service } from "rai
 export default defineRailway(() => {
   const db = postgres("postgres");
 
-  const source = () => github("JakubTeczar/mizaly-app-v2", { branch: "master" });
+  const source = () => github("JakubTeczar/mizaly-app-v2", { branch: "master", rootDirectory: "." });
 
   // Root Directory stays the repo root for all three services (yarn
   // workspaces need to see each other), so the actual build recipe per

@@ -2,18 +2,11 @@
   "$schema": "https://schema.railpack.com",
   "steps": {
     "install": {
-      "commands": [
-        "echo DEBUG-PWD: $(pwd)",
-        "echo DEBUG-LS:",
-        "ls -la",
-        "echo DEBUG-PARENT-LS:",
-        "ls -la .. || echo NO_PARENT",
-        "yarn install --ignore-scripts --frozen-lockfile"
-      ]
+      "commands": ["yarn install --ignore-scripts --frozen-lockfile"]
     },
     "build": {
       "inputs": [{ "step": "install" }],
-      "commands": ["echo DEBUG-BUILD-PWD: $(pwd) && ls -la && yarn workspace @mizaly/mobile build"]
+      "commands": ["yarn workspace @mizaly/mobile build"]
     }
   },
   "deploy": {
