@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import type { NewsletterDetail, NewsletterListItem } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
+import { AiInsightCard } from "./AiInsightCard";
+import { SortControl } from "./SortControl";
+
+const SORT_OPTIONS = [
+  { value: "newest", label: "Najnowsze" },
+  { value: "oldest", label: "Najstarsze" },
+];
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("pl-PL", { day: "numeric", month: "long", year: "numeric" });
@@ -52,43 +59,49 @@ export function NewsletterSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState("newest");
 
   useEffect(() => {
+    setIsLoading(true);
     apiClient
-      .get<NewsletterListItem[]>("/api/newsletters")
+      .get<NewsletterListItem[]>(`/api/newsletters?sortBy=${sortBy}`)
       .then(setNewsletters)
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Nie udało się pobrać newsletterów."))
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [sortBy]);
 
   if (selectedId) {
     return <NewsletterDetailView id={selectedId} onBack={() => setSelectedId(null)} />;
   }
 
   return (
-    <section className="card">
-      <h2>Newslettery</h2>
-      {isLoading && <p className="hint-text">Ładowanie…</p>}
-      {loadError && <p className="error-text">{loadError}</p>}
-      {!isLoading && !loadError && newsletters.length === 0 && (
-        <p className="card-muted-text">Newslettery pojawią się tu po pierwszym sprawdzeniu skrzynki.</p>
-      )}
+    <>
+      <AiInsightCard endpoint="/api/newsletters/insights" />
+      <section className="card">
+        <h2>Newslettery</h2>
+        <SortControl value={sortBy} onChange={setSortBy} options={SORT_OPTIONS} />
+        {isLoading && <p className="hint-text">Ładowanie…</p>}
+        {loadError && <p className="error-text">{loadError}</p>}
+        {!isLoading && !loadError && newsletters.length === 0 && (
+          <p className="card-muted-text">Newslettery pojawią się tu po pierwszym sprawdzeniu skrzynki.</p>
+        )}
 
-      <div className="list">
-        {newsletters.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className="list-item newsletter-list-item"
-            onClick={() => setSelectedId(item.id)}
-          >
-            <p style={{ margin: "0 0 6px", fontWeight: 700 }}>{item.subject}</p>
-            <p className="hint-text" style={{ margin: 0 }}>
-              {(item.fromName || item.fromAddress) ?? "Nieznany nadawca"} · {formatDate(item.receivedAt)}
-            </p>
-          </button>
-        ))}
-      </div>
-    </section>
+        <div className="list">
+          {newsletters.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="list-item newsletter-list-item"
+              onClick={() => setSelectedId(item.id)}
+            >
+              <p style={{ margin: "0 0 6px", fontWeight: 700 }}>{item.subject}</p>
+              <p className="hint-text" style={{ margin: 0 }}>
+                {(item.fromName || item.fromAddress) ?? "Nieznany nadawca"} · {formatDate(item.receivedAt)}
+              </p>
+            </button>
+          ))}
+        </div>
+      </section>
+    </>
   );
 }

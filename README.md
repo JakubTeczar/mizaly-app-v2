@@ -1,6 +1,14 @@
 # Mizaly App v2
 
-Monorepo: `apps/backend` (Express + Prisma), `apps/mobile` (PWA), `apps/admin` (panel administracyjny). Pełny opis w [ROADMAP.md](ROADMAP.md).
+Monorepo: `apps/backend` (Express + Prisma), `apps/mobile` (PWA), `apps/admin` (panel administracyjny). Pełny opis w [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Dokumentacja
+
+Cała dokumentacja projektu (poza tym plikiem) mieszka w [docs/](docs/):
+
+- [docs/ROADMAP.md](docs/ROADMAP.md) — architektura, model danych, fazy prac.
+- [docs/Backlog.md](docs/Backlog.md) — rzeczy odłożone na później, znalezione w trakcie pracy.
+- [docs/zernio-multi-key-per-organization-plan.md](docs/zernio-multi-key-per-organization-plan.md) — plan rozszerzenia limitu kont Zernio per organizacja (niezaimplementowany).
 
 ## Wymagania
 

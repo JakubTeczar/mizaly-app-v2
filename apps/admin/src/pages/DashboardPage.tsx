@@ -1,5 +1,5 @@
 // MVP dashboard: static placeholder metrics until real business analytics
-// are wired up to the backend (see ROADMAP.md, section 5 — "Metryki biznesowe").
+// are wired up to the backend (see docs/ROADMAP.md, section 5 — "Metryki biznesowe").
 const MOCK_METRICS = [
   { label: "Aktywni użytkownicy", value: "12" },
   { label: "Przychód MRR", value: "0 zł (brak płatnego planu)" },

@@ -12,5 +12,8 @@
     "dev:admin": "yarn workspace @mizaly/admin dev",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down"
+  },
+  "devDependencies": {
+    "railway": "^3.5.7"
   }
 }

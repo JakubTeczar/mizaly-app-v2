@@ -28,8 +28,9 @@ import socialAccountsRouter from "./routes/socialAccounts";
 import mediaRouter from "./routes/media";
 import analyticsRouter from "./routes/analytics";
 import mediaPreviewRouter from "./routes/mediaPreview";
+import inspirationMediaRouter from "./routes/inspirationMedia";
 import path from "path";
-import { INSPIRATION_IMAGES_ROUTE } from "./lib/localImageStore";
+import { INSPIRATION_MEDIA_ROUTE } from "./lib/r2Store";
 
 const app = express();
 
@@ -39,10 +40,11 @@ app.use(cors());
 // the raw file.
 app.use(express.json({ limit: "20mb" }));
 
-// Locally re-hosted Instagram images for the Inspiracje tab (see
-// lib/localImageStore.ts and jobs/inspirationScrapeJob.ts) - display-only,
-// never sent to Zernio, so disk + static serving is enough (no Cloudinary).
-app.use(INSPIRATION_IMAGES_ROUTE, express.static(path.join(__dirname, "..", "storage", "inspiration")));
+// Scraped Instagram media (images + Reels) for the Inspiracje tab, re-hosted
+// in Cloudflare R2 (see lib/r2Store.ts and jobs/inspirationScrapeJob.ts) -
+// display-only, never sent to Zernio. The bucket is private, so this route
+// proxies/streams objects out of R2 rather than serving a public URL.
+app.use(INSPIRATION_MEDIA_ROUTE, inspirationMediaRouter);
 
 // Fonts/logo used by the story template - served over HTTP only for the dev
 // preview route below (/preview/story); the real render pipeline reads these

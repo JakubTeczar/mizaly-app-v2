@@ -2,7 +2,7 @@ import { Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { verifyAccessToken } from "./lib/jwt";
 
-// One Socket.IO room per organization (see ROADMAP.md section 3). Clients
+// One Socket.IO room per organization (see docs/ROADMAP.md section 3). Clients
 // connect with their JWT access token in the handshake auth payload:
 //   io("http://localhost:4000", { auth: { token: accessToken } })
 export function createSocketServer(httpServer: HttpServer): SocketIOServer {

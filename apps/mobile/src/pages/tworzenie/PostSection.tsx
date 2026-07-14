@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import type { Post, SocialAccount, SocialPlatform } from "@mizaly/shared";
+import type { CarouselSlide, Post, SocialAccount, SocialPlatform } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
 import { fileToDataUrl, cropToSafeAspectRatio } from "../../lib/imageCrop";
 import { Modal } from "../../components/Modal";
 import { PostPreview } from "./PostPreview";
+import { CarouselSlideEditor } from "./CarouselSlideEditor";
 
 interface AiCaptionResponse {
   title: string;
@@ -70,6 +71,13 @@ export function PostSection() {
   const [mediaUrls, setMediaUrls] = useState<string[]>([]);
   const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Saved carousel definition (source of truth for re-editing) - null/[]
+  // means the post is just plain uploaded photos. Once saved, mediaUrls
+  // above holds the rendered slide images actually sent to Zernio, see
+  // CarouselSlideEditor's onSave.
+  const [carouselSlides, setCarouselSlides] = useState<CarouselSlide[]>([]);
+  const [isCarouselEditorOpen, setIsCarouselEditorOpen] = useState(false);
 
   // Collapsed by default - AI generation is an optional helper, not part of
   // the main composing flow, so it shouldn't push the form down on entry.
@@ -175,6 +183,16 @@ export function PostSection() {
     setMediaUrls((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleOpenCarouselEditor = () => {
+    setIsCarouselEditorOpen(true);
+  };
+
+  const handleRemoveCarousel = () => {
+    setCarouselSlides([]);
+    setPhotoPreviews([]);
+    setMediaUrls([]);
+  };
+
   const handleGenerateWithAi = async () => {
     if (!aiTopic.trim()) return;
     setAiError(null);
@@ -269,6 +287,7 @@ export function PostSection() {
     setPlatforms([]);
     setPhotoPreviews([]);
     setMediaUrls([]);
+    setCarouselSlides([]);
     setScheduledFor("");
     setIsScheduleModalOpen(false);
     setStoryTemplate("none");
@@ -328,6 +347,7 @@ export function PostSection() {
       content,
       firstComment: firstComment.trim() || undefined,
       mediaUrls,
+      carouselSlides: carouselSlides.length > 0 ? carouselSlides : undefined,
       platforms,
       status: "draft",
     });
@@ -632,6 +652,22 @@ export function PostSection() {
                   ))}
                 </div>
               )}
+              <div className="carousel-actions">
+                <button type="button" className="btn btn-secondary" onClick={handleOpenCarouselEditor}>
+                  {carouselSlides.length > 0 ? "Edytuj karuzelę" : "Wygeneruj karuzelę"}
+                </button>
+                {carouselSlides.length > 0 && (
+                  <button type="button" className="btn-text" onClick={handleRemoveCarousel}>
+                    Usuń karuzelę
+                  </button>
+                )}
+              </div>
+              {carouselSlides.length > 0 && (
+                <p className="hint-text">
+                  Zdjęcia powyżej to wygenerowane slajdy karuzeli ({carouselSlides.length}) - ręcznie dodane zdjęcia
+                  zastąpią je przy publikacji.
+                </p>
+              )}
             </div>
           </div>
 
@@ -772,7 +808,7 @@ export function PostSection() {
           heading={heading}
           content={content}
           firstComment={firstComment}
-          imageUrl={storyTemplate !== "none" && templatePreviewUrl ? templatePreviewUrl : photoPreviews[0]}
+          imageUrls={storyTemplate !== "none" && templatePreviewUrl ? [templatePreviewUrl] : photoPreviews}
         />
         {storyTemplate !== "none" && isLoadingTemplatePreview && (
           <p className="hint-text" style={{ marginTop: 8 }}>
@@ -781,6 +817,19 @@ export function PostSection() {
         )}
         {storyTemplate !== "none" && templatePreviewError && <p className="error-text">{templatePreviewError}</p>}
       </section>
+
+      {isCarouselEditorOpen && (
+        <CarouselSlideEditor
+          initialSlides={carouselSlides}
+          onClose={() => setIsCarouselEditorOpen(false)}
+          onSave={(rendered, uploaded, slides) => {
+            setCarouselSlides(slides);
+            setPhotoPreviews(rendered);
+            setMediaUrls(uploaded);
+            setIsCarouselEditorOpen(false);
+          }}
+        />
+      )}
 
       {isScheduleModalOpen && (
         <Modal title="Zaplanuj publikację" onClose={() => setIsScheduleModalOpen(false)}>

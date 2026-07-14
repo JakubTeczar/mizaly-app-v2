@@ -1,0 +1,9 @@
+[phases.setup]
+nixPkgs = ["nodejs_20", "yarn", "python311", "python311Packages.pip", "ffmpeg", "chromium"]
+
+[phases.install]
+cmds = [
+  "yarn install --ignore-scripts --frozen-lockfile",
+  "node node_modules/yt-dlp-exec/scripts/postinstall.js || true",
+  "pip install --break-system-packages -r apps/instagram-scraper/requirements.txt"
+]

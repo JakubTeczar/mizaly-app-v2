@@ -6,9 +6,9 @@
 // cannot return another channel's caption track (OAuth-owner-only), so we'd
 // need yt-dlp for transcripts either way.
 //
-// Called ONLY by the every-2-days background job in
-// src/jobs/youtubeScrapeJob.ts, which persists results to ScrapedYoutubeVideo
-// / ScrapedYoutubeComment - API routes read from the DB, never from here.
+// Called ONLY by the daily background job in src/jobs/youtubeScrapeJob.ts,
+// which persists results to ScrapedYoutubeVideo / ScrapedYoutubeComment - API
+// routes read from the DB, never from here.
 
 import youtubedl from "yt-dlp-exec";
 
@@ -38,7 +38,9 @@ export interface YoutubeVideoDetails {
   comments: YoutubeComment[];
 }
 
-const COMMENTS_TO_FETCH = 50;
+// Safety cap against mega-viral videos with tens of thousands of comments
+// stalling/blowing up a scrape run - see docs/Backlog.md for the reasoning.
+const COMMENTS_TO_FETCH = 3000;
 
 export async function listRecentVideos(handle: string, limit = 3): Promise<YoutubeVideoSummary[]> {
   const info: any = await youtubedl(`https://www.youtube.com/@${handle}/videos`, {

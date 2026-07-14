@@ -120,6 +120,10 @@ model Post {
   content        String           @db.Text
   firstComment   String?
   mediaUrls      String[]
+  // Editable source for a generated carousel (order + heading/text/background
+  // per slide) - null for plain photo posts. mediaUrls stays the compiled
+  // result actually sent to Zernio either way, see routes/posts.ts.
+  carouselSlides Json?
   platforms      SocialPlatform[]
   status         ContentStatus    @default(draft)
   scheduledAt    DateTime?
@@ -205,11 +209,13 @@ model Message {
   @@index([conversationId])
 }
 
-// Instagram posts scraped by the every-2-days Apify job (see
-// src/jobs/inspirationScrapeJob.ts). Global, not organization-scoped - the
-// watched account list is a hardcoded global for now (ROADMAP: make it
-// per-tenant later). `id` is Instagram's own post id, so re-scrapes upsert
-// and refresh engagement counts instead of duplicating rows.
+// Instagram posts scraped by the daily job (see
+// src/jobs/inspirationScrapeJob.ts, via src/integrations/instagramScraper.ts
+// - our own Scrape.do-backed scraper, not a third-party scraping service).
+// Global, not organization-scoped - the watched account list is a hardcoded
+// global for now (ROADMAP: make it per-tenant later). `id` is Instagram's
+// own post id (shortcode), so re-scrapes upsert and refresh engagement
+// counts instead of duplicating rows.
 model ScrapedInstagramPost {
   id             String    @id
   username       String
@@ -217,21 +223,29 @@ model ScrapedInstagramPost {
   type           String
   caption        String    @db.Text
   imageUrl       String
+  videoUrl       String?
+  isReel         Boolean   @default(false)
   likesCount     Int       @default(0)
   commentsCount  Int       @default(0)
   videoViewCount Int?
   postedAt       DateTime?
   scrapedAt      DateTime  @default(now())
 
+  @@unique([username, postedAt])
   @@index([username])
 }
 
-// AI-generated engagement analysis of the scraped posts, produced at the end
-// of each scrape job run. The newest row is what the app shows.
+// AI-generated engagement/insight analysis of scraped content, produced at
+// the end of each scrape job run (Instagram/YouTube/Newsletter each write
+// their own rows). The newest row per `source` is what the app shows - see
+// routes/inspiration.ts, routes/youtubeVideos.ts, routes/newsletters.ts.
 model InspirationAnalysis {
   id        String   @id @default(cuid())
+  source    String   @default("instagram") // "instagram" | "youtube" | "newsletter"
   content   String   @db.Text
   createdAt DateTime @default(now())
+
+  @@index([source, createdAt])
 }
 
 // Instagram accounts watched by the scrape job - editable from the

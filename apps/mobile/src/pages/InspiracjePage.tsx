@@ -15,7 +15,6 @@ export function InspiracjePage() {
   const [activeSource, setActiveSource] = useState<InspirationSource>("instagram");
   const [showFavorites, setShowFavorites] = useState(false);
 
-  const [sourceUrl, setSourceUrl] = useState("");
   const [content, setContent] = useState("");
   const [tags, setTags] = useState("");
   const [note, setNote] = useState("");
@@ -42,7 +41,6 @@ export function InspiracjePage() {
     setIsSubmitting(true);
     try {
       const created = await apiClient.post<InspirationItem>("/api/inspiration-items", {
-        sourceUrl: sourceUrl.trim() || undefined,
         content: content.trim(),
         tags: tags
           .split(",")
@@ -51,7 +49,6 @@ export function InspiracjePage() {
         note: note.trim() || undefined,
       });
       setItems((prev) => [created, ...prev]);
-      setSourceUrl("");
       setContent("");
       setTags("");
       setNote("");
@@ -98,16 +95,6 @@ export function InspiracjePage() {
             <h2>Dodaj inspirację ręcznie</h2>
 
             <form onSubmit={handleAdd}>
-              <div className="field">
-                <label htmlFor="sourceUrl">Link źródłowy (opcjonalnie)</label>
-                <input
-                  id="sourceUrl"
-                  type="url"
-                  value={sourceUrl}
-                  onChange={(e) => setSourceUrl(e.target.value)}
-                  placeholder="https://…"
-                />
-              </div>
               <div className="field">
                 <label htmlFor="content">Treść</label>
                 <textarea

@@ -20,3 +20,7 @@ postgres-data/
 
 # Locally re-hosted scraped images (see apps/backend/src/lib/localImageStore.ts)
 apps/backend/storage/
+
+# Python bytecode cache (apps/instagram-scraper)
+__pycache__/
+*.pyc

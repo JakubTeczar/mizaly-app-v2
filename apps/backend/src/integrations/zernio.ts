@@ -21,7 +21,7 @@
 //     anything - we tag our `redirect_url` with our own correlation id and,
 //     on callback, just re-fetch listAccounts() to pick up what changed.
 //
-// NOT built yet (later milestones, per ROADMAP.md):
+// NOT built yet (later milestones, per docs/ROADMAP.md):
 //   - Webhook receiver for engagement events (new comments/DMs)
 
 import { HttpError } from "../lib/httpError";

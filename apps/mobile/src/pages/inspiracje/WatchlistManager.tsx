@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Modal } from "../../components/Modal";
 
 interface WatchlistItem {
   id: string;
@@ -34,6 +35,7 @@ export function WatchlistManager({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<WatchlistItem | null>(null);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -50,7 +52,10 @@ export function WatchlistManager({
     }
   };
 
-  const handleRemove = async (id: string) => {
+  const handleConfirmRemove = async () => {
+    if (!pendingRemoval) return;
+    const id = pendingRemoval.id;
+    setPendingRemoval(null);
     setRemovingId(id);
     try {
       await onRemove(id);
@@ -80,7 +85,7 @@ export function WatchlistManager({
                 className="watchlist-chip-remove"
                 aria-label={`Usuń ${item.label}`}
                 disabled={removingId === item.id}
-                onClick={() => handleRemove(item.id)}
+                onClick={() => setPendingRemoval(item)}
               >
                 ×
               </button>
@@ -101,6 +106,23 @@ export function WatchlistManager({
         </button>
       </form>
       {formError && <p className="error-text">{formError}</p>}
+
+      {pendingRemoval && (
+        <Modal title="Usuń z obserwowanych" onClose={() => setPendingRemoval(null)}>
+          <p>
+            Czy na pewno chcesz usunąć <strong>{pendingRemoval.label}</strong> z listy obserwowanych? Kolejne
+            pobranie danych nie będzie już obejmować tego konta/kanału.
+          </p>
+          <div className="modal-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => setPendingRemoval(null)}>
+              Anuluj
+            </button>
+            <button type="button" className="btn btn-danger" onClick={handleConfirmRemove}>
+              Usuń
+            </button>
+          </div>
+        </Modal>
+      )}
     </section>
   );
 }

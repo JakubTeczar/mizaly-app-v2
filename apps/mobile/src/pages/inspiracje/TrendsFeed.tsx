@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { InspirationItem } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
 import { ImageLightbox } from "../../components/ImageLightbox";
+import { TopMetricsStrip } from "./TopMetricsStrip";
+import { SortControl } from "./SortControl";
 
 interface InstagramPost {
   id: string;
@@ -9,6 +11,8 @@ interface InstagramPost {
   type: string;
   caption: string;
   imageUrl: string;
+  videoUrl: string | null;
+  isReel: boolean;
   likesCount: number;
   commentsCount: number;
   videoViewCount: number | null;
@@ -34,6 +38,18 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
 }
 
+function formatDateTime(iso: string): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("pl-PL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+const SORT_OPTIONS = [
+  { value: "date", label: "Najnowsze" },
+  { value: "likes", label: "Najwięcej polubień" },
+  { value: "comments", label: "Najwięcej komentarzy" },
+  { value: "views", label: "Najwięcej wyświetleń" },
+];
+
 // Saved-post callback lets the parent page prepend the new item to the
 // "Tablica zapisanych inspiracji" list without refetching.
 export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => void }) {
@@ -44,29 +60,57 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [lightboxPost, setLightboxPost] = useState<InstagramPost | null>(null);
+  const [lastScrapedAt, setLastScrapedAt] = useState<string | null>(null);
+  const [isScraping, setIsScraping] = useState(false);
+  const [scrapeError, setScrapeError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState("date");
+
+  const loadTrends = async (sort: string) => {
+    try {
+      const res = await apiClient.get<TrendsResponse>(`/api/inspiration/trends?sortBy=${sort}`);
+      if (res.status === "ok") {
+        setPosts(res.posts ?? []);
+        setLastScrapedAt(res.lastScrapedAt ?? null);
+      } else {
+        setWipMessage(res.message ?? "Ta funkcja jest w budowie.");
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Nie udało się pobrać postów.");
+    }
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .get<TrendsResponse>("/api/inspiration/trends")
-      .then((res) => {
-        if (cancelled) return;
-        if (res.status === "ok") {
-          setPosts(res.posts ?? []);
-        } else {
-          setWipMessage(res.message ?? "Ta funkcja jest w budowie.");
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof ApiError ? err.message : "Nie udało się pobrać postów.");
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    setIsLoading(true);
+    loadTrends(sortBy).finally(() => setIsLoading(false));
+  }, [sortBy]);
+
+  const topPosts = useMemo(
+    () =>
+      [...posts]
+        .sort((a, b) => b.likesCount - a.likesCount)
+        .slice(0, 3)
+        .map((post) => ({
+          id: post.id,
+          title: post.caption ? post.caption.slice(0, 60) : `@${post.username}`,
+          valueLabel: `${formatCount(post.likesCount)} polubień`,
+          thumbnailUrl: post.imageUrl,
+          onClick: () => setLightboxPost(post),
+        })),
+    [posts]
+  );
+
+  const handleScrapeNow = async () => {
+    setIsScraping(true);
+    setScrapeError(null);
+    try {
+      await apiClient.post("/api/inspiration/scrape-now");
+      await loadTrends(sortBy);
+    } catch (err) {
+      setScrapeError(err instanceof ApiError ? err.message : "Nie udało się pobrać nowych treści.");
+    } finally {
+      setIsScraping(false);
+    }
+  };
 
   const handleSave = async (post: InstagramPost) => {
     setSavingId(post.id);
@@ -86,25 +130,47 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
   };
 
   return (
-    <section className="card">
-      <h2>Trendujące treści</h2>
-      {isLoading && <p className="hint-text">Ładowanie…</p>}
-      {error && <p className="error-text">{error}</p>}
-      {wipMessage && <p className="card-muted-text">{wipMessage}</p>}
+    <>
+      <TopMetricsStrip heading="Top 3 posty" items={topPosts} />
+
+      <section className="card">
+        <div className="card-header-row">
+          <h2>Trendujące treści</h2>
+          <button type="button" className="btn btn-secondary btn-small" disabled={isScraping} onClick={handleScrapeNow}>
+            {isScraping ? "Pobieranie…" : "Pobierz teraz"}
+          </button>
+        </div>
+        {lastScrapedAt && (
+          <p className="hint-text" style={{ marginBottom: 10 }}>
+            Ostatnio pobrano: {formatDateTime(lastScrapedAt)}
+          </p>
+        )}
+        {scrapeError && <p className="error-text">{scrapeError}</p>}
+        {!wipMessage && <SortControl value={sortBy} onChange={setSortBy} options={SORT_OPTIONS} />}
+        {isLoading && <p className="hint-text">Ładowanie…</p>}
+        {error && <p className="error-text">{error}</p>}
+        {wipMessage && <p className="card-muted-text">{wipMessage}</p>}
 
       {!isLoading && !error && posts.length > 0 && (
         <div className="insta-feed">
           {posts.map((post) => (
             <article key={post.id} className="insta-post">
-              {post.imageUrl && (
-                <button
-                  type="button"
-                  className="insta-post-image"
-                  onClick={() => setLightboxPost(post)}
-                  aria-label="Powiększ zdjęcie"
-                >
-                  <img src={post.imageUrl} alt={`Post @${post.username}`} loading="lazy" />
-                </button>
+              {post.videoUrl ? (
+                <div className="insta-post-image">
+                  {post.isReel && <span className="insta-post-reel-badge">Reels</span>}
+                  <video src={post.videoUrl} poster={post.imageUrl || undefined} controls playsInline preload="metadata" />
+                </div>
+              ) : (
+                post.imageUrl && (
+                  <button
+                    type="button"
+                    className="insta-post-image"
+                    onClick={() => setLightboxPost(post)}
+                    aria-label="Powiększ zdjęcie"
+                  >
+                    <img src={post.imageUrl} alt={`Post @${post.username}`} loading="lazy" />
+                  </button>
+                )
               )}
               <div className="insta-post-body">
                 <div className="insta-post-meta">
@@ -145,54 +211,7 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
           onClose={() => setLightboxPost(null)}
         />
       )}
-    </section>
-  );
-}
-
-interface AnalysisResponse {
-  status: "ok" | "pending";
-  message?: string;
-  content?: string;
-  createdAt?: string;
-}
-
-// AI write-up of the scraped posts' engagement, regenerated after every
-// scrape-job run (see backend src/jobs/inspirationScrapeJob.ts).
-export function AnalysisCard() {
-  const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .get<AnalysisResponse>("/api/inspiration/analysis")
-      .then((res) => {
-        if (!cancelled) setAnalysis(res);
-      })
-      .catch(() => {
-        if (!cancelled) setError("Nie udało się pobrać analizy.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return (
-    <section className="card">
-      <h2>Analiza AI</h2>
-      {error && <p className="error-text">{error}</p>}
-      {!analysis && !error && <p className="hint-text">Ładowanie…</p>}
-      {analysis?.status === "pending" && <p className="card-muted-text">{analysis.message}</p>}
-      {analysis?.status === "ok" && (
-        <>
-          <p className="analysis-text">{analysis.content}</p>
-          {analysis.createdAt && (
-            <p className="hint-text" style={{ marginTop: 8 }}>
-              Wygenerowano: {new Date(analysis.createdAt).toLocaleString("pl-PL")}
-            </p>
-          )}
-        </>
-      )}
-    </section>
+      </section>
+    </>
   );
 }

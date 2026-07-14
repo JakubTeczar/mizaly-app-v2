@@ -5,6 +5,7 @@
 
 import { prisma } from "../lib/prisma";
 import { fetchMailBody, isMailConfigured, listMailEnvelopes } from "../integrations/mail";
+import { generateNewsletterInsights } from "../lib/contentInsights";
 
 const CHECK_EVERY_MS = 60 * 60 * 1000;
 
@@ -45,6 +46,14 @@ export async function runNewsletterFetchJob(): Promise<void> {
       }
     }
     console.log(`[newsletter-job] Stored ${newEnvelopes.length} new newsletter(s).`);
+
+    if (newEnvelopes.length > 0) {
+      try {
+        await generateNewsletterInsights();
+      } catch (err) {
+        console.error("[newsletter-job] AI insights generation failed:", err);
+      }
+    }
   } catch (err) {
     console.error("[newsletter-job] Fetch failed:", err);
   } finally {

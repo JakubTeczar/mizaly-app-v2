@@ -1,5 +1,5 @@
 // Wspólne typy i enumy używane przez backend, mobile i admin.
-// Powinny odzwierciedlać model danych z ROADMAP.md — przy zmianie schematu Prisma, zaktualizuj też ten plik.
+// Powinny odzwierciedlać model danych z docs/ROADMAP.md — przy zmianie schematu Prisma, zaktualizuj też ten plik.
 
 export enum ContentStatus {
   DRAFT = "draft",
@@ -72,6 +72,13 @@ export interface SocialAccount {
   connectedAt: string;
 }
 
+export interface CarouselSlide {
+  order: number;
+  heading?: string;
+  text?: string;
+  backgroundImageUrl?: string;
+}
+
 export interface Post {
   id: string;
   organizationId: string;
@@ -79,6 +86,7 @@ export interface Post {
   content: string;
   firstComment?: string;
   mediaUrls: string[];
+  carouselSlides?: CarouselSlide[] | null;
   platforms: SocialPlatform[];
   status: ContentStatus;
   scheduledAt?: string;
@@ -144,6 +152,7 @@ export interface YoutubeVideoSummary {
   commentCount: number;
   durationSec?: number | null;
   publishedAt?: string | null;
+  scrapedAt: string;
 }
 
 export interface YoutubeVideoComment {

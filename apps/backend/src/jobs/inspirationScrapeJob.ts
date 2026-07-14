@@ -1,18 +1,20 @@
-// Background job: every day scrape the watched Instagram accounts via
-// Apify, upsert the posts into ScrapedInstagramPost, then have OpenAI analyze
-// the engagement numbers (likes/comments/views) and store the write-up in
-// InspirationAnalysis. API routes only ever read those tables - the Apify
-// API is never called from a request handler.
+// Background job: every day scrape the watched Instagram accounts via our
+// own scraper (apps/instagram-scraper, fronting Scrape.do - see
+// integrations/instagramScraper.ts), upsert the posts into
+// ScrapedInstagramPost, then have OpenAI analyze the engagement numbers
+// (likes/comments/views) and store the write-up in InspirationAnalysis
+// (source: "instagram"). API routes only ever read those tables - the
+// scraper is never called from a request handler.
 //
 // Scheduling is staleness-based rather than a fixed cron expression: on boot
 // (and then hourly) we check the newest scrapedAt and run only if it's older
 // than SCRAPE_INTERVAL_MS. This survives server restarts/redeploys (Railway)
 // without an external cron service and without double-running.
 
-import OpenAI from "openai";
 import { prisma } from "../lib/prisma";
-import { isApifyConfigured, scrapeInstagramAccounts } from "../integrations/apify";
-import { saveImageLocally } from "../lib/localImageStore";
+import { isInstagramScraperConfigured, scrapeInstagramAccounts } from "../integrations/instagramScraper";
+import { saveMediaToR2 } from "../lib/r2Store";
+import { generateInstagramInsights } from "../lib/contentInsights";
 
 const SCRAPE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const CHECK_EVERY_MS = 60 * 60 * 1000;
@@ -20,53 +22,17 @@ const BACKEND_PUBLIC_URL = (process.env.BACKEND_PUBLIC_URL || `http://localhost:
 
 let isRunning = false;
 
-async function generateAnalysis(): Promise<void> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.warn("[inspiration-job] OPENAI_API_KEY missing - skipping AI analysis.");
-    return;
-  }
-
-  const posts = await prisma.scrapedInstagramPost.findMany({ orderBy: { postedAt: "desc" } });
-  if (posts.length === 0) return;
-
-  const summaryInput = posts.map((p) => ({
-    username: p.username,
-    type: p.type,
-    likes: p.likesCount,
-    comments: p.commentsCount,
-    videoViews: p.videoViewCount,
-    postedAt: p.postedAt?.toISOString().slice(0, 10) ?? null,
-    caption: p.caption.slice(0, 200),
-  }));
-
-  const client = new OpenAI({ apiKey });
-  const completion = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content:
-          "Jesteś analitykiem social media. Otrzymasz dane o postach z Instagrama (konto, typ, polubienia, komentarze, wyświetlenia wideo, data, fragment opisu). " +
-          "Napisz po polsku zwięzłą analizę (maks. 250 słów): które treści osiągają najlepsze zaangażowanie i dlaczego, " +
-          "jakie formaty (wideo/zdjęcie/karuzela) i tematy działają najlepiej, oraz 2-3 konkretne wnioski dla twórcy planującego własne posty. " +
-          "Pisz zwykłym tekstem z krótkimi akapitami, bez nagłówków markdown.",
-      },
-      { role: "user", content: JSON.stringify(summaryInput) },
-    ],
-  });
-
-  const content = completion.choices[0]?.message?.content?.trim();
-  if (!content) return;
-
-  await prisma.inspirationAnalysis.create({ data: { content } });
-  console.log("[inspiration-job] AI analysis stored.");
+// Exposed so routes/inspiration.ts's manual "pobierz teraz" endpoint can
+// avoid kicking off a second overlapping run if the hourly scheduler (or a
+// previous manual click) is already mid-scrape.
+export function isInspirationScrapeRunning(): boolean {
+  return isRunning;
 }
 
 export async function runInspirationScrapeJob(): Promise<void> {
   if (isRunning) return;
-  if (!isApifyConfigured()) {
-    console.warn("[inspiration-job] APIFY_API_KEY missing - skipping scrape.");
+  if (!isInstagramScraperConfigured()) {
+    console.warn("[inspiration-job] SCRAPE_DO_KEY missing - skipping scrape.");
     return;
   }
 
@@ -78,25 +44,63 @@ export async function runInspirationScrapeJob(): Promise<void> {
     const scrapedAt = new Date();
 
     for (const post of posts) {
-      // Instagram's CDN blocks hotlinking from other domains and the URLs
-      // are short-lived anyway, so re-host locally before storing - see
-      // lib/localImageStore.ts. Best-effort: fall back to the raw (possibly
-      // broken) URL rather than dropping the post if the download fails.
-      let imageUrl = post.imageUrl;
-      if (post.imageUrl) {
+      // Matched by (username, postedAt) rather than `id` - Instagram's own
+      // post identifier has changed format before (raw numeric pk -> the
+      // current shortcode) and silently produced duplicate rows for the
+      // same real post when it did, since upsert-by-id can't tell a changed
+      // id apart from a genuinely new post. (username, postedAt) is stable
+      // regardless of what id scheme is in use - see the unique constraint
+      // on ScrapedInstagramPost. Falls back to matching by `id` for the rare
+      // post with no postedAt, since Postgres treats every NULL as distinct
+      // (the unique constraint wouldn't catch a real duplicate there anyway).
+      const uniqueWhere = post.postedAt
+        ? { username_postedAt: { username: post.username, postedAt: post.postedAt } }
+        : { id: post.id };
+
+      // A post's media never changes once published, so a post already
+      // seen in a previous run keeps its already-stored R2 urls instead of
+      // re-downloading/re-uploading the same bytes every day - only the
+      // engagement counters below are worth refreshing.
+      const existing = await prisma.scrapedInstagramPost.findUnique({ where: uniqueWhere });
+
+      let imageUrl = existing?.imageUrl ?? post.imageUrl;
+      if (!existing && post.imageUrl) {
+        // Instagram's CDN blocks hotlinking from other domains and the URLs
+        // are short-lived anyway, so re-host in Cloudflare R2 before storing -
+        // see lib/r2Store.ts. Best-effort: fall back to the raw (possibly
+        // broken) URL rather than dropping the post if the download fails.
         try {
-          const localPath = await saveImageLocally(post.imageUrl, post.id);
-          imageUrl = `${BACKEND_PUBLIC_URL}${localPath}`;
+          const path = await saveMediaToR2(post.imageUrl, post.id, "jpg");
+          imageUrl = `${BACKEND_PUBLIC_URL}${path}`;
         } catch (err) {
           console.error(`[inspiration-job] Failed to re-host image for post ${post.id}:`, err);
         }
       }
 
+      let videoUrl: string | null = existing?.videoUrl ?? null;
+      if (!existing && post.videoUrl) {
+        // Reels/feed videos: video_versions links are just as short-lived as
+        // the image ones, so the actual video file is downloaded and
+        // re-hosted the same way (previously this was skipped entirely -
+        // only the thumbnail was ever saved).
+        try {
+          const path = await saveMediaToR2(post.videoUrl, post.id, "mp4");
+          videoUrl = `${BACKEND_PUBLIC_URL}${path}`;
+        } catch (err) {
+          console.error(`[inspiration-job] Failed to re-host video for post ${post.id}:`, err);
+        }
+      }
+
       await prisma.scrapedInstagramPost.upsert({
-        where: { id: post.id },
+        where: uniqueWhere,
         update: {
+          id: post.id,
+          url: post.url,
+          type: post.type,
           caption: post.caption,
           imageUrl,
+          videoUrl,
+          isReel: post.isReel,
           likesCount: post.likesCount,
           commentsCount: post.commentsCount,
           videoViewCount: post.videoViewCount,
@@ -109,6 +113,8 @@ export async function runInspirationScrapeJob(): Promise<void> {
           type: post.type,
           caption: post.caption,
           imageUrl,
+          videoUrl,
+          isReel: post.isReel,
           likesCount: post.likesCount,
           commentsCount: post.commentsCount,
           videoViewCount: post.videoViewCount,
@@ -120,7 +126,7 @@ export async function runInspirationScrapeJob(): Promise<void> {
     console.log(`[inspiration-job] Stored ${posts.length} posts.`);
 
     try {
-      await generateAnalysis();
+      await generateInstagramInsights();
     } catch (err) {
       console.error("[inspiration-job] AI analysis failed:", err);
     }

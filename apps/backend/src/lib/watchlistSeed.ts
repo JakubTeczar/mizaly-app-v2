@@ -3,7 +3,7 @@
 // once an admin has edited either list via the Inspiracje tab.
 
 import { prisma } from "./prisma";
-import { DEFAULT_INSTAGRAM_ACCOUNTS } from "../integrations/apify";
+import { DEFAULT_INSTAGRAM_ACCOUNTS } from "../integrations/instagramScraper";
 
 const DEFAULT_YOUTUBE_CHANNELS = [
   { handle: "SzymonNegacz", displayName: "Szymon Negacz" },

@@ -15,12 +15,30 @@ router.use(requireAuth);
 
 router.get(
   "/",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const order = req.query.sortBy === "oldest" ? "asc" : "desc";
     const newsletters = await prisma.newsletterEmail.findMany({
-      orderBy: { receivedAt: "desc" },
+      orderBy: { receivedAt: order },
       select: { id: true, subject: true, fromName: true, fromAddress: true, receivedAt: true },
     });
     res.json(newsletters);
+  })
+);
+
+// Section-level AI insight (recurring themes across recent newsletters),
+// generated after each fetch run that found new messages - see
+// lib/contentInsights.ts's generateNewsletterInsights().
+router.get(
+  "/insights",
+  asyncHandler(async (_req, res) => {
+    const latest = await prisma.inspirationAnalysis.findFirst({
+      where: { source: "newsletter" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!latest) {
+      return res.json({ status: "pending", message: "Analiza pojawi się po pobraniu pierwszych newsletterów." });
+    }
+    res.json({ status: "ok", content: latest.content, createdAt: latest.createdAt.toISOString() });
   })
 );
 

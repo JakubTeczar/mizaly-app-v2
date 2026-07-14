@@ -11,7 +11,7 @@ const router = Router();
 router.use(requireAuth);
 
 // Two creation paths: from an existing Post (derive title/body from it - a
-// stub for future AI-assisted generation, per ROADMAP.md section 3), or
+// stub for future AI-assisted generation, per docs/ROADMAP.md section 3), or
 // from scratch with an explicit title/body.
 const fromSourcePostSchema = z.object({
   sourcePostId: z.string().min(1),

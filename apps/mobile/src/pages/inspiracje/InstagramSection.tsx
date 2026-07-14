@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { InspirationItem, WatchedInstagramAccount } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
-import { AnalysisCard, TrendsFeed } from "./TrendsFeed";
+import { TrendsFeed } from "./TrendsFeed";
+import { AiInsightCard } from "./AiInsightCard";
 import { WatchlistManager } from "./WatchlistManager";
 
 interface WipResponse {
@@ -75,8 +76,8 @@ export function InstagramSection({ onSaved }: { onSaved: (item: InspirationItem)
         onAdd={handleAdd}
         onRemove={handleRemove}
       />
+      <AiInsightCard endpoint="/api/inspiration/analysis" />
       <TrendsFeed onSaved={onSaved} />
-      <AnalysisCard />
       <WipCard title="Analiza konkurencji" endpoint="/api/inspiration/competitors" />
     </>
   );

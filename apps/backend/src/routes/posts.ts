@@ -10,17 +10,26 @@ import { ensureZernioProfileId } from "../integrations/zernioProfile";
 import { resolveZernioApiKey } from "../integrations/zernioApiKeys";
 import { uploadMedia } from "../integrations/cloudinary";
 import { buildStoryHtml } from "../media/storyTemplate";
+import { buildCarouselSlideHtml } from "../media/carouselTemplate";
 import { renderHtmlToJpeg } from "../media/render";
 
 const router = Router();
 
 router.use(requireAuth);
 
+const carouselSlideSchema = z.object({
+  order: z.number(),
+  heading: z.string().optional(),
+  text: z.string().optional(),
+  backgroundImageUrl: z.string().optional(),
+});
+
 const createPostSchema = z.object({
   heading: z.string().min(1),
   content: z.string().min(1),
   firstComment: z.string().optional(),
   mediaUrls: z.array(z.string()).optional(),
+  carouselSlides: z.array(carouselSlideSchema).optional(),
   platforms: z.array(z.enum(SOCIAL_PLATFORM_VALUES)).optional(),
   status: z.enum(CONTENT_STATUS_VALUES).optional(),
   scheduledAt: z.string().datetime().optional(),
@@ -131,6 +140,7 @@ router.post(
         content: data.content,
         firstComment: data.firstComment,
         mediaUrls: data.mediaUrls ?? [],
+        carouselSlides: data.carouselSlides,
         platforms: data.platforms ?? [],
         status: data.status ?? "draft",
         scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : undefined,
@@ -169,6 +179,29 @@ router.post(
   })
 );
 
+const carouselSlidePreviewSchema = z.object({
+  backgroundImageUrl: z.string().optional(),
+  heading: z.string().optional(),
+  text: z.string().optional(),
+});
+
+// On-demand render of a single carousel slide for the slide editor's live
+// preview - same shape as /story-preview above, doesn't touch the database
+// or Cloudinary. The slide editor calls this once per slide; the actual
+// upload into mediaUrls only happens when the user saves the carousel (see
+// PostSection.tsx).
+router.post(
+  "/carousel-slide-preview",
+  asyncHandler(async (req, res) => {
+    const data = carouselSlidePreviewSchema.parse(req.body);
+
+    const html = buildCarouselSlideHtml(data);
+    const buffer = await renderHtmlToJpeg(html, { width: 1080, height: 1080 });
+
+    res.json({ dataUrl: `data:image/jpeg;base64,${buffer.toString("base64")}` });
+  })
+);
+
 router.patch(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -188,6 +221,7 @@ router.patch(
         content: data.content,
         firstComment: data.firstComment,
         mediaUrls: data.mediaUrls,
+        carouselSlides: data.carouselSlides,
         platforms: data.platforms,
         status: data.status,
         scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : undefined,

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type TouchEvent } from "react";
 import {
   BookmarkIcon,
   CommentIcon,
@@ -15,7 +15,72 @@ interface PostPreviewProps {
   heading: string;
   content: string;
   firstComment: string;
-  imageUrl?: string;
+  imageUrls?: string[];
+}
+
+// Swipeable when there's more than one image (a carousel) - touch swipe for
+// the mobile PWA plus arrow buttons for mouse/desktop testing, since a
+// carousel post's preview should let you page through it the same way it'll
+// actually look once published. A single image just renders with no
+// controls, same as before this existed.
+function PreviewImageCarousel({ imageUrls }: { imageUrls: string[] }) {
+  const [index, setIndex] = useState(0);
+  const touchStartX = useRef<number | null>(null);
+
+  // Snap back to the first slide whenever the underlying image set changes
+  // (new upload, carousel regenerated) so we never point past the end.
+  useEffect(() => {
+    setIndex(0);
+  }, [imageUrls]);
+
+  if (imageUrls.length === 0) return null;
+
+  const clampedIndex = Math.min(index, imageUrls.length - 1);
+  const goTo = (next: number) => setIndex(Math.max(0, Math.min(imageUrls.length - 1, next)));
+
+  const handleTouchStart = (event: TouchEvent) => {
+    touchStartX.current = event.touches[0].clientX;
+  };
+  const handleTouchEnd = (event: TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const deltaX = event.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    if (Math.abs(deltaX) < 40) return;
+    goTo(clampedIndex + (deltaX < 0 ? 1 : -1));
+  };
+
+  return (
+    <div className="preview-carousel" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <img src={imageUrls[clampedIndex]} alt="" />
+      {imageUrls.length > 1 && (
+        <>
+          <button
+            type="button"
+            className="preview-carousel-arrow preview-carousel-arrow--left"
+            aria-label="Poprzedni slajd"
+            onClick={() => goTo(clampedIndex - 1)}
+            disabled={clampedIndex === 0}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="preview-carousel-arrow preview-carousel-arrow--right"
+            aria-label="Następny slajd"
+            onClick={() => goTo(clampedIndex + 1)}
+            disabled={clampedIndex === imageUrls.length - 1}
+          >
+            ›
+          </button>
+          <div className="preview-carousel-dots">
+            {imageUrls.map((_, i) => (
+              <span key={i} className={`preview-carousel-dot${i === clampedIndex ? " active" : ""}`} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 type PreviewPlatform = "instagram" | "facebook" | "linkedin" | "x";
@@ -38,7 +103,7 @@ function Avatar({ label }: { label: string }) {
   return <div className="preview-avatar">{label}</div>;
 }
 
-function InstagramPreview({ heading, content, firstComment, imageUrl }: PostPreviewProps) {
+function InstagramPreview({ heading, content, firstComment, imageUrls = [] }: PostPreviewProps) {
   const text = combinedText(heading, content);
   return (
     <div className="preview-card preview-ig">
@@ -50,7 +115,11 @@ function InstagramPreview({ heading, content, firstComment, imageUrl }: PostPrev
         <MoreIcon className="preview-icon" />
       </div>
       <div className="preview-ig-image">
-        {imageUrl ? <img src={imageUrl} alt="" /> : <span className="preview-image-placeholder">Zdjęcie</span>}
+        {imageUrls.length > 0 ? (
+          <PreviewImageCarousel imageUrls={imageUrls} />
+        ) : (
+          <span className="preview-image-placeholder">Zdjęcie</span>
+        )}
       </div>
       <div className="preview-actions-row">
         <HeartIcon className="preview-icon" />
@@ -71,7 +140,7 @@ function InstagramPreview({ heading, content, firstComment, imageUrl }: PostPrev
   );
 }
 
-function FacebookPreview({ heading, content, firstComment, imageUrl }: PostPreviewProps) {
+function FacebookPreview({ heading, content, firstComment, imageUrls = [] }: PostPreviewProps) {
   const text = combinedText(heading, content);
   return (
     <div className="preview-card preview-fb">
@@ -84,9 +153,9 @@ function FacebookPreview({ heading, content, firstComment, imageUrl }: PostPrevi
         <MoreIcon className="preview-icon" />
       </div>
       <p className="preview-text">{text || "Treść posta pojawi się tutaj…"}</p>
-      {imageUrl && (
+      {imageUrls.length > 0 && (
         <div className="preview-image-wrap">
-          <img src={imageUrl} alt="" />
+          <PreviewImageCarousel imageUrls={imageUrls} />
         </div>
       )}
       <div className="preview-actions-row preview-actions-row--bordered">
@@ -105,7 +174,7 @@ function FacebookPreview({ heading, content, firstComment, imageUrl }: PostPrevi
   );
 }
 
-function LinkedinPreview({ heading, content, firstComment, imageUrl }: PostPreviewProps) {
+function LinkedinPreview({ heading, content, firstComment, imageUrls = [] }: PostPreviewProps) {
   const text = combinedText(heading, content);
   return (
     <div className="preview-card preview-li">
@@ -121,9 +190,9 @@ function LinkedinPreview({ heading, content, firstComment, imageUrl }: PostPrevi
         <MoreIcon className="preview-icon" />
       </div>
       <p className="preview-text">{text || "Treść posta pojawi się tutaj…"}</p>
-      {imageUrl && (
+      {imageUrls.length > 0 && (
         <div className="preview-image-wrap">
-          <img src={imageUrl} alt="" />
+          <PreviewImageCarousel imageUrls={imageUrls} />
         </div>
       )}
       <div className="preview-actions-row preview-actions-row--bordered">
@@ -145,7 +214,7 @@ function LinkedinPreview({ heading, content, firstComment, imageUrl }: PostPrevi
   );
 }
 
-function XPreview({ heading, content, firstComment, imageUrl }: PostPreviewProps) {
+function XPreview({ heading, content, firstComment, imageUrls = [] }: PostPreviewProps) {
   const text = combinedText(heading, content);
   return (
     <div className="preview-card preview-x">
@@ -157,9 +226,9 @@ function XPreview({ heading, content, firstComment, imageUrl }: PostPreviewProps
         </div>
       </div>
       <p className="preview-text">{text || "Treść posta pojawi się tutaj…"}</p>
-      {imageUrl && (
+      {imageUrls.length > 0 && (
         <div className="preview-image-wrap preview-image-wrap--rounded">
-          <img src={imageUrl} alt="" />
+          <PreviewImageCarousel imageUrls={imageUrls} />
         </div>
       )}
       <div className="preview-actions-row preview-actions-row--spread">

@@ -61,7 +61,7 @@ async function assertZernioApiKeySlotAvailable(zernioApiKeyId: string, excludeUs
   }
 }
 
-// Admin-initiated tenant provisioning (ROADMAP.md "Dodawanie userów (MVP)").
+// Admin-initiated tenant provisioning (docs/ROADMAP.md "Dodawanie userów (MVP)").
 // Self-service signup also exists via POST /api/auth/register.
 router.post(
   "/users",
