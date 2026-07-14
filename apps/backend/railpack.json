@@ -4,6 +4,7 @@
   "steps": {
     "install": {
       "commands": [
+        "echo DEBUG-PWD: $(pwd) && ls -la && echo DEBUG-APPS: && ls -la apps 2>&1 && echo DEBUG-SCRAPER: && ls -la apps/instagram-scraper 2>&1",
         "yarn install --ignore-scripts --frozen-lockfile",
         "node node_modules/yt-dlp-exec/scripts/postinstall.js || true",
         "pip3 install --break-system-packages -r apps/instagram-scraper/requirements.txt",
