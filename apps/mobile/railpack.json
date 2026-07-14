@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "steps": {
+    "install": {
+      "commands": ["yarn install --ignore-scripts --frozen-lockfile"]
+    },
+    "build": {
+      "inputs": [{ "step": "install" }],
+      "commands": ["yarn workspace @mizaly/mobile build"]
+    }
+  },
+  "deploy": {
+    "startCommand": "npx --yes serve -s apps/mobile/dist -l $PORT"
+  }
+}

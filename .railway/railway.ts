@@ -3,17 +3,18 @@ import { defineRailway, github, postgres, preserve, project, service } from "rai
 export default defineRailway(() => {
   const db = postgres("postgres");
 
-  const source = (dir: string) => github("JakubTeczar/mizaly-app-v2", { branch: "master", rootDirectory: dir });
+  const source = () => github("JakubTeczar/mizaly-app-v2", { branch: "master" });
 
+  // Root Directory stays the repo root for all three services (yarn
+  // workspaces need to see each other), so the actual build recipe per
+  // service lives in its own apps/<name>/railpack.json instead - pointed at
+  // via RAILPACK_CONFIG_FILE, since Railway would otherwise read the same
+  // single railpack.json for every service sharing that root.
   const backend = service("backend", {
-    source: source("."),
-    build: "yarn workspace @mizaly/backend build",
-    start:
-      "export PUPPETEER_EXECUTABLE_PATH=$(which chromium) && " +
-      "node node_modules/prisma/build/index.js migrate deploy --schema apps/backend/prisma/schema.prisma && " +
-      "node apps/backend/dist/index.js",
+    source: source(),
     healthcheck: "/health",
     env: {
+      RAILPACK_CONFIG_FILE: "apps/backend/railpack.json",
       DATABASE_URL: db.env.DATABASE_URL,
       PORT: "4000",
       BACKEND_PUBLIC_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
@@ -44,15 +45,17 @@ export default defineRailway(() => {
   });
 
   const mobile = service("mobile", {
-    source: source("."),
-    build: "yarn workspace @mizaly/mobile build",
-    start: "npx --yes serve -s apps/mobile/dist -l $PORT",
+    source: source(),
+    env: {
+      RAILPACK_CONFIG_FILE: "apps/mobile/railpack.json",
+    },
   });
 
   const admin = service("admin", {
-    source: source("."),
-    build: "yarn workspace @mizaly/admin build",
-    start: "npx --yes serve -s apps/admin/dist -l $PORT",
+    source: source(),
+    env: {
+      RAILPACK_CONFIG_FILE: "apps/admin/railpack.json",
+    },
   });
 
   return project("mizaly-app-v2", {
