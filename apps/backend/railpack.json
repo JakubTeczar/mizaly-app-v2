@@ -6,12 +6,9 @@
       "commands": [
         "yarn install --ignore-scripts --frozen-lockfile",
         "node node_modules/yt-dlp-exec/scripts/postinstall.js || true",
-        "pip3 install --break-system-packages -r apps/instagram-scraper/requirements.txt"
+        "pip3 install --break-system-packages -r apps/instagram-scraper/requirements.txt",
+        "yarn workspace @mizaly/backend build"
       ]
-    },
-    "build": {
-      "inputs": [{ "step": "install" }],
-      "commands": ["yarn workspace @mizaly/backend build"]
     }
   },
   "deploy": {
