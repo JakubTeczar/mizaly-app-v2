@@ -25,6 +25,10 @@ COPY packages/shared/package.json packages/shared/package.json
 # PUPPETEER_EXECUTABLE_PATH above).
 RUN yarn install --ignore-scripts --frozen-lockfile
 RUN node node_modules/yt-dlp-exec/scripts/postinstall.js || true
+# bcrypt is a native addon - its own install script (which --ignore-scripts
+# also skipped) compiles/fetches the actual binding, without it `require`
+# fails at runtime with MODULE_NOT_FOUND on bcrypt_lib.node.
+RUN cd node_modules/bcrypt && node ../.bin/node-pre-gyp install --fallback-to-build
 
 COPY packages/shared packages/shared
 COPY apps/backend apps/backend
