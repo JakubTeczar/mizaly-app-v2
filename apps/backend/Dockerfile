@@ -32,6 +32,10 @@ COPY apps/instagram-scraper apps/instagram-scraper
 
 RUN pip3 install --no-cache-dir --break-system-packages -r apps/instagram-scraper/requirements.txt
 
+# --ignore-scripts above also skipped @prisma/client's own postinstall
+# (which normally generates the client) - do it explicitly.
+RUN node node_modules/prisma/build/index.js generate --schema apps/backend/prisma/schema.prisma
+
 RUN yarn workspace @mizaly/backend build
 
 WORKDIR /app/apps/backend
