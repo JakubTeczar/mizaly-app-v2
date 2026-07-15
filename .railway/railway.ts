@@ -9,13 +9,21 @@ export default defineRailway(() => {
   // control over what gets copied/built rather than relying on Railway's
   // auto-detected Railpack builder (which had unpredictable, hard-to-debug
   // behavior with this monorepo's checkout/caching).
-  const source = (dockerfilePath: string) =>
-    github("JakubTeczar/mizaly-app-v2", { branch: "master", rootDirectory: ".", dockerfilePath });
+  //
+  // NOTE: the `dockerfilePath` field on github() looked correct but never
+  // actually took effect server-side (config apply reported success, the
+  // live service kept using Railpack) - the Dockerfile path is instead set
+  // per-service via the RAILWAY_DOCKERFILE_PATH env var below, which does
+  // work. Don't add `dockerfilePath` back here without re-verifying against
+  // `railway config pull` that it's actually applied - a `config apply` that
+  // "succeeds" isn't proof by itself for this field.
+  const source = () => github("JakubTeczar/mizaly-app-v2", { branch: "master", rootDirectory: "." });
 
   const backend = service("backend", {
-    source: source("apps/backend/Dockerfile"),
+    source: source(),
     healthcheck: "/health",
     env: {
+      RAILWAY_DOCKERFILE_PATH: preserve(),
       DATABASE_URL: db.env.DATABASE_URL,
       PORT: "4000",
       BACKEND_PUBLIC_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
@@ -46,11 +54,19 @@ export default defineRailway(() => {
   });
 
   const mobile = service("mobile", {
-    source: source("apps/mobile/Dockerfile"),
+    source: source(),
+    env: {
+      RAILWAY_DOCKERFILE_PATH: preserve(),
+      VITE_API_URL: "https://${{backend.RAILWAY_PUBLIC_DOMAIN}}",
+    },
   });
 
   const admin = service("admin", {
-    source: source("apps/admin/Dockerfile"),
+    source: source(),
+    env: {
+      RAILWAY_DOCKERFILE_PATH: preserve(),
+      VITE_API_URL: "https://${{backend.RAILWAY_PUBLIC_DOMAIN}}",
+    },
   });
 
   return project("mizaly-app-v2", {

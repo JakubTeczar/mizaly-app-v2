@@ -16,6 +16,11 @@ RUN yarn install --ignore-scripts --frozen-lockfile
 COPY packages/shared packages/shared
 COPY apps/mobile apps/mobile
 
+# Vite bakes VITE_* vars into the bundle at build time (not readable at
+# container runtime), so this has to be a build ARG, passed in as a Railway
+# service variable of the same name - see .railway/railway.ts.
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
 RUN yarn workspace @mizaly/mobile build
 
 ENV NODE_ENV=production
