@@ -3,18 +3,19 @@ import { defineRailway, github, postgres, preserve, project, service } from "rai
 export default defineRailway(() => {
   const db = postgres("postgres");
 
-  const source = () => github("JakubTeczar/mizaly-app-v2", { branch: "master", rootDirectory: "." });
-
   // Root Directory stays the repo root for all three services (yarn
-  // workspaces need to see each other), so the actual build recipe per
-  // service lives in its own apps/<name>/railpack.json instead - pointed at
-  // via RAILPACK_CONFIG_FILE, since Railway would otherwise read the same
-  // single railpack.json for every service sharing that root.
+  // workspaces need to see each other) - each service instead points at its
+  // own Dockerfile (apps/<name>/Dockerfile), which is given full explicit
+  // control over what gets copied/built rather than relying on Railway's
+  // auto-detected Railpack builder (which had unpredictable, hard-to-debug
+  // behavior with this monorepo's checkout/caching).
+  const source = (dockerfilePath: string) =>
+    github("JakubTeczar/mizaly-app-v2", { branch: "master", rootDirectory: ".", dockerfilePath });
+
   const backend = service("backend", {
-    source: source(),
+    source: source("apps/backend/Dockerfile"),
     healthcheck: "/health",
     env: {
-      RAILPACK_CONFIG_FILE: "apps/backend/railpack.json",
       DATABASE_URL: db.env.DATABASE_URL,
       PORT: "4000",
       BACKEND_PUBLIC_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
@@ -45,17 +46,11 @@ export default defineRailway(() => {
   });
 
   const mobile = service("mobile", {
-    source: source(),
-    env: {
-      RAILPACK_CONFIG_FILE: "apps/mobile/railpack.json",
-    },
+    source: source("apps/mobile/Dockerfile"),
   });
 
   const admin = service("admin", {
-    source: source(),
-    env: {
-      RAILPACK_CONFIG_FILE: "apps/admin/railpack.json",
-    },
+    source: source("apps/admin/Dockerfile"),
   });
 
   return project("mizaly-app-v2", {
