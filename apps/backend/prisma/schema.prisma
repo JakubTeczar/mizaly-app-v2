@@ -230,6 +230,12 @@ model ScrapedInstagramPost {
   videoViewCount Int?
   postedAt       DateTime?
   scrapedAt      DateTime  @default(now())
+  // Set by lib/contentClassification.ts after scraping - null until the
+  // classification job picks it up (also doubles as the backfill marker for
+  // posts scraped before this column existed).
+  topic          String?
+  format         String?
+  hook           String?
 
   @@unique([username, postedAt])
   @@index([username])
@@ -281,6 +287,12 @@ model ScrapedYoutubeVideo {
   transcript    String?   @db.Text
   publishedAt   DateTime?
   scrapedAt     DateTime  @default(now())
+  // Set by lib/contentClassification.ts after scraping - null until the
+  // classification job picks it up (also doubles as the backfill marker for
+  // videos scraped before this column existed).
+  topic         String?
+  format        String?
+  hook          String?
 
   comments ScrapedYoutubeComment[]
 

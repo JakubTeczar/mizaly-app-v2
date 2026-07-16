@@ -11,11 +11,18 @@ import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { HttpError } from "../lib/httpError";
 import { requireAuth } from "../middleware/requireAuth";
-import { isYoutubeScrapeRunning, runYoutubeScrapeJob } from "../jobs/youtubeScrapeJob";
+import { getYoutubeScrapeProgress, isYoutubeScrapeRunning, runYoutubeScrapeJob } from "../jobs/youtubeScrapeJob";
+import { computeNormalizedScores } from "../lib/engagementNormalization";
 
 const router = Router();
 
 router.use(requireAuth);
+
+// Polled by the frontend to show live "Pobrano X z Y kanałów" progress while
+// a scrape (manual "pobierz teraz" or the hourly background job) is running.
+router.get("/scrape-status", (_req, res) => {
+  res.json(getYoutubeScrapeProgress());
+});
 
 // Manual "pobierz teraz" trigger - mirrors POST /api/inspiration/scrape-now.
 // Awaits the full scrape (yt-dlp per watched channel) before responding.
@@ -39,14 +46,20 @@ const YOUTUBE_SORT_OPTIONS = {
   likes: { likeCount: "desc" as const },
   comments: { commentCount: "desc" as const },
 };
-type YoutubeSortBy = keyof typeof YOUTUBE_SORT_OPTIONS;
+type YoutubePrismaSortBy = keyof typeof YOUTUBE_SORT_OPTIONS;
+// "normalized" ranks each video against its own channel's median daily
+// engagement rate instead of Prisma orderBy - see lib/engagementNormalization.ts.
+type YoutubeSortBy = YoutubePrismaSortBy | "normalized";
 
 router.get(
   "/",
   asyncHandler(async (req, res) => {
     const channelHandle = typeof req.query.channel === "string" ? req.query.channel : undefined;
     const sortByParam = typeof req.query.sortBy === "string" ? req.query.sortBy : "date";
-    const sortBy: YoutubeSortBy = sortByParam in YOUTUBE_SORT_OPTIONS ? (sortByParam as YoutubeSortBy) : "date";
+    const sortBy: YoutubeSortBy =
+      sortByParam === "normalized" || sortByParam in YOUTUBE_SORT_OPTIONS
+        ? (sortByParam as YoutubeSortBy)
+        : "date";
 
     // Removing a channel from the watchlist (DELETE /api/youtube-channels/:id)
     // only deletes the watchlist row, not the videos already scraped from it
@@ -60,7 +73,7 @@ router.get(
 
     const videos = await prisma.scrapedYoutubeVideo.findMany({
       where: { channelHandle: { in: effectiveHandles } },
-      orderBy: YOUTUBE_SORT_OPTIONS[sortBy],
+      orderBy: sortBy === "normalized" ? { publishedAt: "desc" } : YOUTUBE_SORT_OPTIONS[sortBy],
       select: {
         id: true,
         channelHandle: true,
@@ -72,27 +85,32 @@ router.get(
         durationSec: true,
         publishedAt: true,
         scrapedAt: true,
+        topic: true,
+        format: true,
+        hook: true,
       },
     });
-    res.json(videos);
-  })
-);
 
-// Section-level AI insight (emotions/questions/themes across recent videos'
-// comments), generated at the end of each scrape run - see
-// lib/contentInsights.ts's generateYoutubeInsights(). Distinct from the
-// per-video on-demand /:id/analyze below.
-router.get(
-  "/insights",
-  asyncHandler(async (_req, res) => {
-    const latest = await prisma.inspirationAnalysis.findFirst({
-      where: { source: "youtube" },
-      orderBy: { createdAt: "desc" },
+    // Computed for every video regardless of sortBy so the frontend can show
+    // the "Nx normy kanału" badge no matter how the list is currently sorted.
+    const scores = computeNormalizedScores(videos, {
+      getEngagement: (v) => v.likeCount + v.commentCount + v.viewCount / 10,
+      getPostedAt: (v) => v.publishedAt,
+      getGroupKey: (v) => v.channelHandle,
     });
-    if (!latest) {
-      return res.json({ status: "pending", message: "Analiza pojawi się po pierwszym pobraniu filmów." });
-    }
-    res.json({ status: "ok", content: latest.content, createdAt: latest.createdAt.toISOString() });
+    const orderedVideos =
+      sortBy === "normalized"
+        ? [...videos].sort(
+            (a, b) => (scores.get(b)!.outlierRatio ?? -Infinity) - (scores.get(a)!.outlierRatio ?? -Infinity)
+          )
+        : videos;
+
+    res.json(
+      orderedVideos.map((v) => {
+        const score = scores.get(v)!;
+        return { ...v, dailyRate: score.dailyRate, outlierRatio: score.outlierRatio, isMature: score.isMature };
+      })
+    );
   })
 );
 

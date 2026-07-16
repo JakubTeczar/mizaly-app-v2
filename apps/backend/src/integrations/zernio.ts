@@ -91,10 +91,11 @@ export interface ZernioConnectInitiateResult {
 // that aren't wired up yet, so callers should only offer the ones below.
 const PLATFORM_SLUG_OVERRIDES: Record<string, string> = { x: "twitter" };
 
+// YouTube is intentionally excluded: it doesn't support publishing regular
+// posts, only video uploads, which this app's composer doesn't do.
 export const OAUTH_CONNECTABLE_PLATFORMS = [
   "instagram",
   "tiktok",
-  "youtube",
   "x",
   "linkedin",
   "facebook",

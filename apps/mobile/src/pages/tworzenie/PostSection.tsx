@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import type { CarouselSlide, Post, SocialAccount, SocialPlatform } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
 import { fileToDataUrl, cropToSafeAspectRatio } from "../../lib/imageCrop";
+import { platformLabel } from "../../lib/platformLabels";
 import { Modal } from "../../components/Modal";
 import { PostPreview } from "./PostPreview";
-import { CarouselSlideEditor } from "./CarouselSlideEditor";
+// Konva pulls in a real canvas rendering engine (~280KB) - only worth
+// loading once someone actually opens the carousel editor, not on every
+// visit to the post composer.
+const CarouselSlideEditor = lazy(() =>
+  import("./CarouselSlideEditor").then((m) => ({ default: m.CarouselSlideEditor }))
+);
+import { FEATURE_FLAGS } from "../../lib/featureFlags";
 
 interface AiCaptionResponse {
   title: string;
@@ -51,6 +58,33 @@ function InfoTip({ text }: { text: string }) {
       </button>
       {isOpen && <span className="info-tip-bubble">{text}</span>}
     </>
+  );
+}
+
+function PhotoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="M21 15l-5-5-9 9" />
+    </svg>
+  );
+}
+
+function CarouselIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="7" y="7" width="14" height="14" rx="2" />
+      <path d="M3 15V5a2 2 0 0 1 2-2h10" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
   );
 }
 
@@ -108,12 +142,6 @@ export function PostSection() {
   // publish time, never saved on the post itself.
   const [storyTemplate, setStoryTemplate] = useState<StoryTemplate>("none");
   const [seriesName, setSeriesName] = useState("");
-
-  // Collapsed by default, same reasoning as the AI section above - first
-  // comment and story template are secondary, occasional choices, not part
-  // of the core "write and publish" path, so they shouldn't take up space
-  // on entry.
-  const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
 
   // Auto-regenerated (debounced) whenever the template or its inputs change -
   // see the effect below. templatePreviewRequestId guards against an older,
@@ -450,8 +478,12 @@ export function PostSection() {
                 type="button"
                 className={aiMode === "precise" ? "active" : ""}
                 onClick={() => setAiMode("precise")}
+                disabled={FEATURE_FLAGS.postAiDokladne}
               >
                 Dokładne
+                {FEATURE_FLAGS.postAiDokladne && (
+                  <span className="badge-coming-soon badge-coming-soon--tab">Wkrótce</span>
+                )}
               </button>
             </div>
 
@@ -615,22 +647,31 @@ export function PostSection() {
           </div>
 
           <div className="form-section">
-            <p className="form-section-title">Zdjęcia</p>
+            <div className="field-label-row" style={{ marginBottom: 12 }}>
+              <p className="form-section-title" style={{ margin: 0 }}>Zdjęcia</p>
+              <InfoTip text="Zdjęcia o nietypowych proporcjach są automatycznie przycinane do formatu zgodnego z Instagramem." />
+            </div>
             <div className="field">
-              <div className="field-label-row">
-                <label>Zdjęcia</label>
-                <InfoTip text="Zdjęcia o nietypowych proporcjach są automatycznie przycinane do formatu zgodnego z Instagramem." />
+              <div className="photo-action-row">
+                <label
+                  htmlFor="photos"
+                  className={`photo-action-btn${carouselSlides.length > 0 ? " photo-action-btn-disabled" : ""}`}
+                >
+                  <PhotoIcon />
+                  Dodaj zdjęcie
+                </label>
+                <button type="button" className="photo-action-btn" onClick={handleOpenCarouselEditor}>
+                  <CarouselIcon />
+                  {carouselSlides.length > 0 ? "Edytuj karuzelę" : "Wygeneruj karuzelę"}
+                </button>
               </div>
-              <label htmlFor="photos" className="photo-picker-button">
-                Dodaj zdjęcia
-              </label>
               <input
                 id="photos"
                 type="file"
                 accept="image/*"
                 multiple
                 onChange={handlePhotosChange}
-                disabled={isUploadingPhotos}
+                disabled={isUploadingPhotos || carouselSlides.length > 0}
                 style={{ display: "none" }}
               />
               {isUploadingPhotos && <p className="hint-text">Wgrywanie zdjęć…</p>}
@@ -652,90 +693,20 @@ export function PostSection() {
                   ))}
                 </div>
               )}
-              <div className="carousel-actions">
-                <button type="button" className="btn btn-secondary" onClick={handleOpenCarouselEditor}>
-                  {carouselSlides.length > 0 ? "Edytuj karuzelę" : "Wygeneruj karuzelę"}
-                </button>
-                {carouselSlides.length > 0 && (
+              {carouselSlides.length > 0 && (
+                <div className="carousel-actions">
                   <button type="button" className="btn-text" onClick={handleRemoveCarousel}>
                     Usuń karuzelę
                   </button>
-                )}
-              </div>
+                </div>
+              )}
               {carouselSlides.length > 0 && (
                 <p className="hint-text">
-                  Zdjęcia powyżej to wygenerowane slajdy karuzeli ({carouselSlides.length}) - ręcznie dodane zdjęcia
-                  zastąpią je przy publikacji.
+                  Zdjęcia powyżej to wygenerowane slajdy karuzeli ({carouselSlides.length}). Usuń karuzelę, żeby
+                  zamiast niej dodać zdjęcia ręcznie - post może mieć jedno albo drugie, nie oba naraz.
                 </p>
               )}
             </div>
-          </div>
-
-          <div className="collapsible-inline">
-            <button
-              type="button"
-              className="collapsible-toggle"
-              aria-expanded={isMoreOptionsOpen}
-              onClick={() => setIsMoreOptionsOpen((prev) => !prev)}
-            >
-              <span>Więcej opcji (pierwszy komentarz, szablon relacji)</span>
-              <svg
-                className={`collapsible-chevron${isMoreOptionsOpen ? " open" : ""}`}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-            {isMoreOptionsOpen && (
-              <div className="collapsible-body">
-                <div className="field">
-                  <div className="field-label-row">
-                    <label htmlFor="firstComment">Pierwszy komentarz</label>
-                    <InfoTip text="Działa tylko na Facebooku i LinkedIn. Instagram (i inne platformy) nie obsługuje automatycznego pierwszego komentarza." />
-                  </div>
-                  <textarea
-                    id="firstComment"
-                    value={firstComment}
-                    onChange={(e) => setFirstComment(e.target.value)}
-                    placeholder="Opcjonalnie"
-                  />
-                </div>
-
-                <div className="field">
-                  <div className="field-label-row">
-                    <label htmlFor="storyTemplate">Szablon relacji (Instagram Story)</label>
-                    <InfoTip text="Dotyczy tylko relacji publikowanej automatycznie na Instagramie razem z postem. Domyślnie to po prostu to samo zdjęcie co w poście, bez żadnej grafiki." />
-                  </div>
-                  <select
-                    id="storyTemplate"
-                    value={storyTemplate}
-                    onChange={(e) => {
-                      setStoryTemplate(e.target.value as StoryTemplate);
-                      setTemplatePreviewUrl(null);
-                      setTemplatePreviewError(null);
-                    }}
-                  >
-                    <option value="none">Brak (surowe zdjęcie)</option>
-                    <option value="new_post">Nowy post</option>
-                    <option value="series">Seria</option>
-                  </select>
-                  {storyTemplate === "series" && (
-                    <input
-                      type="text"
-                      value={seriesName}
-                      onChange={(e) => setSeriesName(e.target.value)}
-                      placeholder="Nazwa serii, np. Trening w domu #3"
-                    />
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
           <div className="form-section">
@@ -749,21 +720,24 @@ export function PostSection() {
                   Nie masz jeszcze podłączonych kont. <Link to="/konta">Połącz konto</Link>, żeby móc publikować.
                 </p>
               ) : (
-                <div>
-                  {connectedPlatforms.map((platform) => (
-                    <span
-                      key={platform}
-                      className="tag-pill"
-                      style={{
-                        cursor: "pointer",
-                        background: platforms.includes(platform) ? "var(--color-primary)" : "var(--color-primary-tint)",
-                        color: platforms.includes(platform) ? "#fff" : "var(--color-primary)",
-                      }}
-                      onClick={() => togglePlatform(platform)}
-                    >
-                      {platform}
-                    </span>
-                  ))}
+                <div className="platform-picker">
+                  {connectedPlatforms.map((platform) => {
+                    const isSelected = platforms.includes(platform);
+                    return (
+                      <button
+                        key={platform}
+                        type="button"
+                        className={`platform-chip${isSelected ? " active" : ""}`}
+                        aria-pressed={isSelected}
+                        onClick={() => togglePlatform(platform)}
+                      >
+                        <span className="platform-chip-check" aria-hidden="true">
+                          {isSelected && <CheckIcon />}
+                        </span>
+                        {platformLabel(platform)}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -804,6 +778,33 @@ export function PostSection() {
 
       <section className="card">
         <h2>Podgląd posta</h2>
+        <div className="field">
+          <div className="field-label-row">
+            <label htmlFor="storyTemplate">Szablon posta</label>
+            <InfoTip text="Dotyczy tylko relacji publikowanej automatycznie na Instagramie razem z postem. Domyślnie to po prostu to samo zdjęcie co w poście, bez żadnej grafiki." />
+          </div>
+          <select
+            id="storyTemplate"
+            value={storyTemplate}
+            onChange={(e) => {
+              setStoryTemplate(e.target.value as StoryTemplate);
+              setTemplatePreviewUrl(null);
+              setTemplatePreviewError(null);
+            }}
+          >
+            <option value="none">Brak (surowe zdjęcie)</option>
+            <option value="new_post">Nowy post</option>
+            <option value="series">Seria</option>
+          </select>
+          {storyTemplate === "series" && (
+            <input
+              type="text"
+              value={seriesName}
+              onChange={(e) => setSeriesName(e.target.value)}
+              placeholder="Nazwa serii, np. Trening w domu #3"
+            />
+          )}
+        </div>
         <PostPreview
           heading={heading}
           content={content}
@@ -818,17 +819,37 @@ export function PostSection() {
         {storyTemplate !== "none" && templatePreviewError && <p className="error-text">{templatePreviewError}</p>}
       </section>
 
+      <section className="card">
+        <div className="field" style={{ marginBottom: 0 }}>
+          <div className="card-header-row">
+            <label htmlFor="firstComment" style={{ margin: 0 }}>
+              Pierwszy komentarz
+            </label>
+            <span className="badge-coming-soon">Wkrótce</span>
+          </div>
+          <textarea id="firstComment" disabled={FEATURE_FLAGS.postPierwszyKomentarz} placeholder="Napisz pierwszy komentarz" />
+        </div>
+      </section>
+
       {isCarouselEditorOpen && (
-        <CarouselSlideEditor
-          initialSlides={carouselSlides}
-          onClose={() => setIsCarouselEditorOpen(false)}
-          onSave={(rendered, uploaded, slides) => {
-            setCarouselSlides(slides);
-            setPhotoPreviews(rendered);
-            setMediaUrls(uploaded);
-            setIsCarouselEditorOpen(false);
-          }}
-        />
+        <Suspense
+          fallback={
+            <Modal title="Edytor karuzeli" onClose={() => setIsCarouselEditorOpen(false)}>
+              <p className="hint-text">Ładowanie edytora…</p>
+            </Modal>
+          }
+        >
+          <CarouselSlideEditor
+            initialSlides={carouselSlides}
+            onClose={() => setIsCarouselEditorOpen(false)}
+            onSave={(rendered, uploaded, slides) => {
+              setCarouselSlides(slides);
+              setPhotoPreviews(rendered);
+              setMediaUrls(uploaded);
+              setIsCarouselEditorOpen(false);
+            }}
+          />
+        </Suspense>
       )}
 
       {isScheduleModalOpen && (

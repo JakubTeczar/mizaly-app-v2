@@ -72,11 +72,24 @@ export interface SocialAccount {
   connectedAt: string;
 }
 
+export type CarouselTextFontFamily = "Bebas Neue" | "Gantari" | "Montserrat";
+
+export interface CarouselTextLayer {
+  id: string;
+  content: string;
+  x: number;
+  y: number;
+  width: number;
+  fontSize: number;
+  fontFamily: CarouselTextFontFamily;
+  color: string;
+  align: "left" | "center" | "right";
+}
+
 export interface CarouselSlide {
   order: number;
-  heading?: string;
-  text?: string;
   backgroundImageUrl?: string;
+  textLayers: CarouselTextLayer[];
 }
 
 export interface Post {
@@ -142,6 +155,48 @@ export interface WatchedYoutubeChannel {
   createdAt: string;
 }
 
+// Canonical classification axes - single source of truth shared by the
+// backend's classification prompt (lib/contentClassification.ts) and the
+// frontend ranking view (ClassificationRanking.tsx). "inne" is a safety
+// valve so the model isn't forced into a bad fit.
+export const CONTENT_TOPICS = [
+  "edukacja",
+  "sprzedaż",
+  "storytelling/marka osobista",
+  "motywacja",
+  "oferta/promocja",
+  "rozrywka",
+  "behind-the-scenes",
+  "trend/challenge",
+  "inne",
+] as const;
+
+export const CONTENT_FORMATS = [
+  "storytime",
+  "poradnik",
+  "ranking/listicle",
+  "talking head",
+  "Q&A",
+  "behind-the-scenes",
+  "przed/po",
+  "reakcja na trend",
+  "inne",
+] as const;
+
+export const CONTENT_HOOKS = [
+  "pytanie",
+  "szokujące twierdzenie",
+  "liczba/statystyka",
+  "problem na starcie",
+  "osobista historia",
+  "cliffhanger",
+  "inne",
+] as const;
+
+export type ContentTopic = (typeof CONTENT_TOPICS)[number];
+export type ContentFormat = (typeof CONTENT_FORMATS)[number];
+export type ContentHook = (typeof CONTENT_HOOKS)[number];
+
 export interface YoutubeVideoSummary {
   id: string;
   channelHandle: string;
@@ -153,6 +208,16 @@ export interface YoutubeVideoSummary {
   durationSec?: number | null;
   publishedAt?: string | null;
   scrapedAt: string;
+  // Engagement per day since publishing, normalized against this channel's
+  // own median (see lib/engagementNormalization.ts on the backend). Present
+  // regardless of sortBy so the UI can show the badge no matter the sort.
+  dailyRate?: number;
+  outlierRatio?: number | null;
+  isMature?: boolean;
+  // Set by lib/contentClassification.ts - null until classified.
+  topic?: string | null;
+  format?: string | null;
+  hook?: string | null;
 }
 
 export interface YoutubeVideoComment {
@@ -169,6 +234,13 @@ export interface YoutubeVideoDetail extends YoutubeVideoSummary {
 }
 
 export type YoutubeAnalysisAction = "summarize" | "objections" | "topics";
+
+export interface ScrapeProgress {
+  isRunning: boolean;
+  total: number;
+  done: number;
+  current: string | null;
+}
 
 export interface NewsletterListItem {
   id: string;

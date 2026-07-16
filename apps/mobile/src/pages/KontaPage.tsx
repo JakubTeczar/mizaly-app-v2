@@ -9,6 +9,13 @@ interface PlatformsResponse {
   platforms: string[];
 }
 
+// Frontend-only limit for this version: connecting more accounts is planned
+// but not yet ready (billing/Zernio plan limits aren't wired up).
+const MAX_CONNECTED_ACCOUNTS = 2;
+
+// Platforms Zernio can already connect but that aren't ready to surface yet.
+const COMING_SOON_PLATFORMS = new Set(["x", "pinterest"]);
+
 export function KontaPage() {
   const { user, logout } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -115,25 +122,45 @@ export function KontaPage() {
             <p className="card-muted-text">
               Wybierz platformę. Zostaniesz przekierowany do logowania i autoryzacji dostępu.
             </p>
+            <p className="info-note">
+              W obecnej wersji aplikacji można połączyć maksymalnie {MAX_CONNECTED_ACCOUNTS} konta. Możliwość
+              połączenia większej liczby kont pojawi się w kolejnych aktualizacjach.
+            </p>
             {connectError && <p className="error-text">{connectError}</p>}
             <div className="list">
               {platforms.map((platform) => {
                 const label = platformLabel(platform);
                 const alreadyConnected = connectedPlatformSet.has(platform as any);
+                const comingSoon = COMING_SOON_PLATFORMS.has(platform);
+                const limitReached = accounts.length >= MAX_CONNECTED_ACCOUNTS;
+
+                let buttonLabel: string;
+                if (comingSoon) buttonLabel = label;
+                else if (alreadyConnected) buttonLabel = `${label} (połączono)`;
+                else if (connectingPlatform === platform) buttonLabel = "Przekierowanie…";
+                else buttonLabel = `Połącz ${label}`;
+
                 return (
                   <button
                     key={platform}
                     type="button"
                     className="btn btn-secondary"
-                    style={{ marginBottom: 8 }}
-                    disabled={connectingPlatform !== null || alreadyConnected}
+                    style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                    disabled={comingSoon || alreadyConnected || connectingPlatform !== null || limitReached}
                     onClick={() => handleConnect(platform)}
                   >
-                    {alreadyConnected ? `${label} (połączono)` : connectingPlatform === platform ? "Przekierowanie…" : `Połącz ${label}`}
+                    {buttonLabel}
+                    {comingSoon && <span className="badge-coming-soon">Wkrótce</span>}
                   </button>
                 );
               })}
             </div>
+            {accounts.length >= MAX_CONNECTED_ACCOUNTS && (
+              <p className="hint-text">
+                Masz już połączone {MAX_CONNECTED_ACCOUNTS} konta, czyli maksimum dostępne w obecnej wersji. Odłącz
+                jedno z kont powyżej, aby połączyć inne.
+              </p>
+            )}
           </section>
         </>
       )}

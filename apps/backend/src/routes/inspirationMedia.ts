@@ -16,6 +16,14 @@ router.get("/:filename", async (req, res) => {
     res.setHeader("Cache-Control", "public, max-age=86400");
 
     if (object.Body instanceof Readable) {
+      // Without this, a stream error partway through (e.g. a socket that goes
+      // stale mid-transfer) leaves the response hanging forever instead of
+      // ending it - the browser then shows a permanently-loading broken
+      // image/video rather than a failed one.
+      object.Body.on("error", (err) => {
+        console.error(`[inspiration-media] Stream error for ${req.params.filename}:`, err);
+        res.destroy();
+      });
       object.Body.pipe(res);
     } else {
       res.status(502).end();

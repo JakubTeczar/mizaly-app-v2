@@ -37,6 +37,11 @@ export function WatchlistManager({
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<WatchlistItem | null>(null);
 
+  // Collapsed by default - with 10+ watched accounts/channels the chip list
+  // alone can push the rest of the Inspiracje page far below the fold, and
+  // most visits don't need to touch the watchlist at all.
+  const [isExpanded, setIsExpanded] = useState(false);
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!value.trim()) return;
@@ -66,46 +71,73 @@ export function WatchlistManager({
 
   return (
     <section className="card">
-      <h2>{title}</h2>
-      <p className="card-muted-text" style={{ marginBottom: 12 }}>
-        {description}
-      </p>
+      <button
+        type="button"
+        className="watchlist-header-toggle"
+        aria-expanded={isExpanded}
+        onClick={() => setIsExpanded((prev) => !prev)}
+      >
+        <h2>
+          {title}
+          {!isLoading && <span className="watchlist-count"> ({items.length})</span>}
+        </h2>
+        <svg
+          className={`collapsible-chevron${isExpanded ? " open" : ""}`}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
 
-      {isLoading && <p className="hint-text">Ładowanie…</p>}
-      {loadError && <p className="error-text">{loadError}</p>}
+      {isExpanded && (
+        <div style={{ marginTop: 12 }}>
+          <p className="card-muted-text" style={{ marginBottom: 12 }}>
+            {description}
+          </p>
 
-      {!isLoading && !loadError && (
-        <div className="watchlist-chips">
-          {items.length === 0 && <p className="hint-text">Brak obserwowanych - dodaj pierwszy poniżej.</p>}
-          {items.map((item) => (
-            <span key={item.id} className="watchlist-chip">
-              {item.label}
-              <button
-                type="button"
-                className="watchlist-chip-remove"
-                aria-label={`Usuń ${item.label}`}
-                disabled={removingId === item.id}
-                onClick={() => setPendingRemoval(item)}
-              >
-                ×
-              </button>
-            </span>
-          ))}
+          {isLoading && <p className="hint-text">Ładowanie…</p>}
+          {loadError && <p className="error-text">{loadError}</p>}
+
+          {!isLoading && !loadError && (
+            <div className="watchlist-chips">
+              {items.length === 0 && <p className="hint-text">Brak obserwowanych - dodaj pierwszy poniżej.</p>}
+              {items.map((item) => (
+                <span key={item.id} className="watchlist-chip">
+                  {item.label}
+                  <button
+                    type="button"
+                    className="watchlist-chip-remove"
+                    aria-label={`Usuń ${item.label}`}
+                    disabled={removingId === item.id}
+                    onClick={() => setPendingRemoval(item)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="watchlist-add-form">
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={placeholder}
+            />
+            <button type="submit" className="btn btn-secondary btn-small" disabled={isSubmitting}>
+              {isSubmitting ? "Dodawanie…" : "Dodaj"}
+            </button>
+          </form>
+          {formError && <p className="error-text">{formError}</p>}
         </div>
       )}
-
-      <form onSubmit={handleSubmit} className="watchlist-add-form">
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={placeholder}
-        />
-        <button type="submit" className="btn btn-secondary btn-small" disabled={isSubmitting}>
-          {isSubmitting ? "Dodawanie…" : "Dodaj"}
-        </button>
-      </form>
-      {formError && <p className="error-text">{formError}</p>}
 
       {pendingRemoval && (
         <Modal title="Usuń z obserwowanych" onClose={() => setPendingRemoval(null)}>

@@ -1,32 +1,40 @@
 // Background job: every day scrape the watched Instagram accounts via our
 // own scraper (apps/instagram-scraper, fronting Scrape.do - see
 // integrations/instagramScraper.ts), upsert the posts into
-// ScrapedInstagramPost, then have OpenAI analyze the engagement numbers
-// (likes/comments/views) and store the write-up in InspirationAnalysis
-// (source: "instagram"). API routes only ever read those tables - the
-// scraper is never called from a request handler.
+// ScrapedInstagramPost, then classify each unclassified post's topic/format/
+// hook (lib/contentClassification.ts) so Inspiracje can rank by them. API
+// routes only ever read those tables - the scraper is never called from a
+// request handler.
 //
 // Scheduling is staleness-based rather than a fixed cron expression: on boot
 // (and then hourly) we check the newest scrapedAt and run only if it's older
 // than SCRAPE_INTERVAL_MS. This survives server restarts/redeploys (Railway)
 // without an external cron service and without double-running.
 
+import type { ScrapeProgress } from "@mizaly/shared";
 import { prisma } from "../lib/prisma";
 import { isInstagramScraperConfigured, scrapeInstagramAccounts } from "../integrations/instagramScraper";
 import { saveMediaToR2 } from "../lib/r2Store";
-import { generateInstagramInsights } from "../lib/contentInsights";
+import { classifyUnclassifiedInstagramPosts } from "../lib/contentClassification";
 
 const SCRAPE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const CHECK_EVERY_MS = 60 * 60 * 1000;
 const BACKEND_PUBLIC_URL = (process.env.BACKEND_PUBLIC_URL || `http://localhost:${process.env.PORT || 4000}`).replace(/\/$/, "");
 
 let isRunning = false;
+let progress: { total: number; done: number; current: string | null } = { total: 0, done: 0, current: null };
 
 // Exposed so routes/inspiration.ts's manual "pobierz teraz" endpoint can
 // avoid kicking off a second overlapping run if the hourly scheduler (or a
 // previous manual click) is already mid-scrape.
 export function isInspirationScrapeRunning(): boolean {
   return isRunning;
+}
+
+// Exposed so the frontend can poll and show "Pobrano X z Y kont" while a
+// scrape (manual or hourly-scheduled) is in progress.
+export function getInspirationScrapeProgress(): ScrapeProgress {
+  return { isRunning, ...progress };
 }
 
 export async function runInspirationScrapeJob(): Promise<void> {
@@ -40,7 +48,11 @@ export async function runInspirationScrapeJob(): Promise<void> {
   console.log("[inspiration-job] Starting Instagram scrape...");
   try {
     const watchedAccounts = await prisma.watchedInstagramAccount.findMany();
-    const posts = await scrapeInstagramAccounts(watchedAccounts.map((a) => a.username));
+    progress = { total: watchedAccounts.length, done: 0, current: null };
+    const posts = await scrapeInstagramAccounts(watchedAccounts.map((a) => a.username), (username, doneSoFar) => {
+      progress = { ...progress, done: doneSoFar, current: username };
+    });
+    progress = { ...progress, done: progress.total, current: null };
     const scrapedAt = new Date();
 
     for (const post of posts) {
@@ -126,9 +138,9 @@ export async function runInspirationScrapeJob(): Promise<void> {
     console.log(`[inspiration-job] Stored ${posts.length} posts.`);
 
     try {
-      await generateInstagramInsights();
+      await classifyUnclassifiedInstagramPosts();
     } catch (err) {
-      console.error("[inspiration-job] AI analysis failed:", err);
+      console.error("[inspiration-job] Content classification failed:", err);
     }
   } catch (err) {
     console.error("[inspiration-job] Scrape failed:", err);

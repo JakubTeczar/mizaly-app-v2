@@ -54,6 +54,24 @@ User zauważył, że Canva ma publiczne API z szablonami — sprawdzone pod kąt
 
 - [x] Zbadać Canva Connect API (Autofill/Resize/Export) jako alternatywę — odrzucone, patrz uzasadnienie wyżej (2026-07-10).
 
+### Przebudowa na edytor canvas (react-konva) + zgłoszony bug uploadu zdjęcia (2026-07-16)
+
+User zgłosił, że wygenerowane slajdy karuzeli "wyglądają dość mocno średnio" — jeden na trwałe zaszyty design (ciemne tło, jedna czcionka, tekst zawsze na środku, `templates/carousel.html`/`.css`). Po researchu opcji (SaaS z gotowymi szablonami jak Bannerbear/Placid/Templated, Canva Autofill, biblioteki canvas open-source) i doprecyzowaniu wymagań, zdecydowano zastąpić cały pipeline Puppeteer+HTML/CSS dla karuzeli prawdziwym edytorem: własne zdjęcie jako tło (bez kadrowania w v1) + tekst swobodnie przesuwany/skalowany (jak mini-Canva), eksport obrazka po stronie klienta (`stage.toDataURL()`), bez ponownego renderu na serwerze.
+
+Zaimplementowane:
+- **Biblioteka**: [Konva.js](https://konvajs.org/) przez `react-konva` (+ `use-image`) — MIT, self-hosted, wybrana m.in. dlatego że ma natywne renderowanie po stronie Node.js (przydatne, gdyby kiedyś trzeba było wrócić do renderu serwerowego).
+- **Model danych** (`packages/shared`): `CarouselSlide.heading/text` → `CarouselSlide.textLayers: CarouselTextLayer[]` (`id, content, x, y, width, fontSize, fontFamily, color, align`), współrzędne w stałej przestrzeni 1080×1080 (`MODEL_SIZE`), niezależnej od faktycznego rozmiaru canvasu na ekranie (`useContainerWidth` + `scale`).
+- **`CarouselSlideEditor.tsx`** przepisany od zera: `<Stage>`/`<Layer>` per slajd, zdjęcie w tle (`SlideBackgroundImage`, center-crop do kwadratu), warstwy tekstu z `draggable` + `Transformer` (uniform scale przez `keepRatio` — unika zniekształcenia glifów), edycja treści przez nakładkę `<textarea>` (dwuklik), mini-toolbar (kolor, czcionka: Montserrat/Bebas Neue/Gantari — te same fonty co reszta apki, żadnych nowych plików fontów).
+- **Backend**: usunięty `carouselTemplate.ts`, `templates/carousel.html`/`.css`, endpoint `/api/posts/carousel-slide-preview` — karuzela nie dotyka już Puppeteera, tylko zapisuje JSON layoutu (zod schema zaktualizowana w `routes/posts.ts`).
+- **Bundle**: Konva dodaje ~280KB do JS — `CarouselSlideEditor` doładowywany leniwie (`React.lazy` + `Suspense`) w `PostSection.tsx`, więc koszt płaci tylko ten, kto faktycznie otworzy edytor karuzeli.
+- **Znaleziony i naprawiony bug w trakcie budowy**: nakładka do edycji tekstu (`<textarea>`) czytała pozycję z referencji do węzła Konva (`ref.x()/.y()`) — dla nowo dodanej warstwy ten ref jeszcze nie był podpięty w momencie renderu (refy podłączają się po commicie, nie w trakcie renderu), więc nakładka nigdy się nie pojawiała. Naprawione przez czytanie pozycji z modelu danych (`selectedLayer.x/y`), nie z węzła canvasu — model jest i tak źródłem prawdy (aktualizowany przez `onDragEnd`/`onTransformEnd`).
+- **Zweryfikowane end-to-end przez Playwright** (upload zdjęcia tła, dodanie tekstu, edycja treści, zapis) — zero błędów w konsoli, eksportowany slajd trafia do `mediaUrls` i pojawia się jako miniatura w kompozytorze.
+
+**Zgłoszony bug do zbadania (2026-07-16, koniec sesji)**: User zgłosił, że "wgrywanie zdjęcia nie działa" przy dodawaniu zdjęć do karuzeli — zgłoszone tuż po tym, jak automatyczny test (Playwright, plik testowy `icon-512.png`, jeden slajd) przeszedł bez błędów i zdjęcie renderowało się poprawnie. Rozbieżność do wyjaśnienia jutro:
+- [ ] Odtworzyć problem ręcznie (prawdziwe zdjęcie z telefonu/dysku, nie plik testowy) — sprawdzić czy to kwestia formatu/rozmiaru pliku, konkretnego urządzenia/przeglądarki, czy slajdu innego niż pierwszy (drugi+ slajd nie był testowany automatycznie).
+- [ ] Sprawdzić upload w kontekście dotyku (mobile), nie tylko myszką/desktopem — `input[type=file]` na realnym telefonie może się zachowywać inaczej.
+- [ ] Dociągnąć testy drag/resize tekstu przez Playwright (przerwane w trakcie tej sesji przez timeout logowania przy kolejnym uruchomieniu skryptu, nieprzebadane do końca) — funkcjonalnie kod wygląda poprawnie (ten sam wzorzec co w naprawionym buggu wyżej), ale warto potwierdzić automatycznie, nie tylko wizualnie.
+
 ## 3. Przegląd UX-owy panelu tworzenia posta
 
 Panel "Stwórz posta social media" (`PostSection.tsx`) urósł organicznie (AI szybkie/dokładne, szablon relacji + nazwa serii, pierwszy komentarz z podpowiedzią, zdjęcia z podpowiedzią o przycinaniu, platformy, itd.) i robi się przeładowany — dużo etykiet/podpowiedzi na raz, łatwo się pogubić.
@@ -117,3 +135,13 @@ Do zrobienia / sprawdzenia:
 - **Cloudflare R2 ma osobne, niekompatybilne endpointy per jurysdykcja** — domyślny `https://<account>.r2.cloudflarestorage.com` i np. `https://<account>.eu.r2.cloudflarestorage.com` to dwie zupełnie oddzielne "przestrzenie" bucketów. Użycie złego endpointu daje `NoSuchBucket` nawet z poprawnym tokenem o pełnym dostępie — wygląda jak błąd uprawnień, a to pomyłka w URL-u. Bucket `mizaly-reels-storage` jest pod endpointem **bez** `.eu.`, mimo że lokalizacja fizyczna to "EEUR (Europa)" (to tylko location hint, nie jurysdykcja).
 
 Kontekst: zbudowane na żywo w rozmowie z userem (2026-07-13), łącznie z realnym debugowaniem środowiska (Windows `App Execution Alias` dla `python3`, brakujące pakiety npm/pip, restart procesów blokujących porty/pliki). Backend zostawiony **uruchomiony** na koniec sesji, ale **z kodem sprzed ostatniej zmiany** (optymalizacja pomijania ponownego pobierania mediów) — zrestartować go po wznowieniu pracy, żeby podłapał najnowszy kod, zanim uruchomi się jakikolwiek scrape.
+
+## 6. Analityka: za mało danych + niejasny przycisk pobierania
+
+Zgłoszone przez usera na koniec sesji (2026-07-16), krótko, do doprecyzowania jutro — zapisane możliwie dosłownie, żeby nie zgadywać intencji:
+
+- [ ] **Za mało danych, żeby analityka miała sens** — user: "aktualnie nie ma pobranych wystarczająco dużo danych, więc trzeba będzie pobrać dane do analityki, żeby analityka była sensowna. I zrobić jakieś ograniczenia." Nieprecyzyjne, do ustalenia jutro: czy to o danych z Zernio (`/api/analytics`, dziś tylko 2 dni danych na koncie demo — patrz sekcja o nowym wykresie w historii tej sesji) czy o czymś innym. "Zrobić jakieś ograniczenia" — jakiego rodzaju (limit czasu/ilości?, nieopisane).
+- [ ] **Niejasne, czy pobieranie dodatkowych danych wymaga ręcznej akcji** — user: "czy trzeba kliknąć 'pobierz teraz', żeby się pobrały te dodatkowe posty, czy to się jakoś pokaże [automatycznie]." Uwaga: przycisk **"Pobierz teraz"** istnieje dziś tylko w Inspiracjach (`TrendsFeed.tsx`/`YoutubeSection.tsx` — ręczne wywołanie scrape'a Instagram/YouTube), **nie ma** takiego przycisku przy Analityce/Zernio (tam dane idą przez bezpośrednie wywołanie API przy każdym wejściu na stronę, bez cachowania/kolejki). Do wyjaśnienia z userem: czy pytanie dotyczyło faktycznie Inspiracji, czy oczekuje takiego mechanizmu (manualny trigger + wskaźnik postępu) także dla Analityki.
+- [ ] **Przycisk "pobierz" (prawdopodobnie "Pobierz teraz") powinien mieć więcej informacji przy sobie** — user: "przy przycisku 'pobierz' powinno być więcej informacji." Dziś przycisk w Inspiracjach nie ma żadnego opisu/tooltipa, tylko etykietę + spinner tekstowy ("Pobieranie…") w trakcie. Do ustalenia jakich informacji brakuje (np. kiedy było ostatnie pobranie, co konkretnie się pobiera, ile to trwa).
+
+Kontekst: zgłoszone en passant na sam koniec sesji poświęconej głównie edytorowi karuzeli (punkt 2), user świadomie odłożył temat na następną sesję ("dobra, na tyle, dzięki") — nie doprecyzowywane na żywo, stąd otwarte pytania wyżej.

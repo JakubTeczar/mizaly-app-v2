@@ -12,8 +12,9 @@ export interface Viewport {
 }
 
 // Renders an HTML string to a JPEG buffer via headless Chromium - used to
-// turn a filled-in template (see storyTemplate.ts/carouselTemplate.ts) into
-// an actual image. Writes to a temp file rather than page.setContent(),
+// turn a filled-in template (see storyTemplate.ts) into an actual image.
+// Carousel slides used to go through here too but now render client-side
+// (react-konva). Writes to a temp file rather than page.setContent(),
 // because setContent() resolves relative/file:// asset URLs against
 // about:blank, which breaks the local font/logo references baked into the
 // HTML. `viewport` defaults to the Instagram Story size (1080x1920) so

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",
+    "@smithy/node-http-handler": "^4.9.5",
     "@mizaly/shared": "0.1.0",
     "@prisma/client": "^5.19.1",
     "bcrypt": "^5.1.1",

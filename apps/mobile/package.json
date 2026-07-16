@@ -10,10 +10,13 @@
   },
   "dependencies": {
     "@mizaly/shared": "0.1.0",
+    "konva": "^10.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-konva": "^18.2.16",
     "react-router-dom": "^6.26.1",
-    "socket.io-client": "^4.7.5"
+    "socket.io-client": "^4.7.5",
+    "use-image": "^1.1.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

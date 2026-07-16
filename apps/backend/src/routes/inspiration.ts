@@ -4,11 +4,18 @@ import { asyncHandler } from "../lib/asyncHandler";
 import { HttpError } from "../lib/httpError";
 import { prisma } from "../lib/prisma";
 import { isInstagramScraperConfigured } from "../integrations/instagramScraper";
-import { isInspirationScrapeRunning, runInspirationScrapeJob } from "../jobs/inspirationScrapeJob";
+import { getInspirationScrapeProgress, isInspirationScrapeRunning, runInspirationScrapeJob } from "../jobs/inspirationScrapeJob";
+import { computeNormalizedScores, MIN_RELIABLE_SAMPLE_SIZE } from "../lib/engagementNormalization";
 
 const router = Router();
 
 router.use(requireAuth);
+
+// Polled by the frontend to show live "Pobrano X z Y kont" progress while a
+// scrape (manual "pobierz teraz" or the hourly background job) is running.
+router.get("/scrape-status", (_req, res) => {
+  res.json(getInspirationScrapeProgress());
+});
 
 // Manual "pobierz teraz" trigger - runs the same scrape the hourly scheduler
 // would (see jobs/inspirationScrapeJob.ts), bypassing its staleness check.
@@ -31,6 +38,39 @@ router.post(
   })
 );
 
+// Per-account scrape coverage - lets the frontend show "how much history do
+// we actually have per account" (see AccountStatsPanel.tsx) so it's obvious
+// why a given account isn't showing up yet in the classification ranking
+// (too few mature/classified posts) instead of that just being a mystery.
+// No profile-picture scraping happens for watched accounts (would be an
+// extra Scrape.do request per account per run), so the most recent post's
+// image stands in as a representative thumbnail.
+router.get(
+  "/instagram-account-stats",
+  asyncHandler(async (_req, res) => {
+    const watchedAccounts = await prisma.watchedInstagramAccount.findMany({ orderBy: { createdAt: "asc" } });
+    const accounts = await Promise.all(
+      watchedAccounts.map(async (account) => {
+        const [postCount, latestPost] = await Promise.all([
+          prisma.scrapedInstagramPost.count({ where: { username: account.username } }),
+          prisma.scrapedInstagramPost.findFirst({
+            where: { username: account.username },
+            orderBy: { postedAt: "desc" },
+          }),
+        ]);
+        return {
+          username: account.username,
+          postCount,
+          lastScrapedAt: latestPost?.scrapedAt.toISOString() ?? null,
+          lastPostedAt: latestPost?.postedAt?.toISOString() ?? null,
+          thumbnailUrl: latestPost?.imageUrl || null,
+        };
+      })
+    );
+    res.json({ accounts });
+  })
+);
+
 // Reads the posts collected by the daily scrape job (see
 // src/jobs/inspirationScrapeJob.ts) straight from the DB - no scraper call
 // happens here, so this is always fast.
@@ -40,7 +80,10 @@ const INSTAGRAM_SORT_OPTIONS = {
   comments: { commentsCount: "desc" as const },
   views: [{ videoViewCount: { sort: "desc" as const, nulls: "last" as const } }],
 };
-type InstagramSortBy = keyof typeof INSTAGRAM_SORT_OPTIONS;
+type InstagramPrismaSortBy = keyof typeof INSTAGRAM_SORT_OPTIONS;
+// "normalized" ranks each post against its own account's median daily
+// engagement rate instead of Prisma orderBy - see lib/engagementNormalization.ts.
+type InstagramSortBy = InstagramPrismaSortBy | "normalized";
 
 router.get(
   "/trends",
@@ -50,7 +93,10 @@ router.get(
     }
 
     const sortByParam = typeof req.query.sortBy === "string" ? req.query.sortBy : "date";
-    const sortBy: InstagramSortBy = sortByParam in INSTAGRAM_SORT_OPTIONS ? (sortByParam as InstagramSortBy) : "date";
+    const sortBy: InstagramSortBy =
+      sortByParam === "normalized" || sortByParam in INSTAGRAM_SORT_OPTIONS
+        ? (sortByParam as InstagramSortBy)
+        : "date";
 
     // Removing an account from the watchlist (DELETE /api/instagram-accounts/:id)
     // only deletes the watchlist row, not the posts already scraped from it -
@@ -62,7 +108,7 @@ router.get(
 
     const posts = await prisma.scrapedInstagramPost.findMany({
       where: { username: { in: watchedUsernames } },
-      orderBy: INSTAGRAM_SORT_OPTIONS[sortBy],
+      orderBy: sortBy === "normalized" ? { postedAt: "desc" } : INSTAGRAM_SORT_OPTIONS[sortBy],
     });
     if (posts.length === 0) {
       return res.json({
@@ -71,41 +117,54 @@ router.get(
       });
     }
 
+    // Computed for every post regardless of sortBy so the frontend can show
+    // the "Nx normy konta" badge no matter how the list is currently sorted.
+    const scores = computeNormalizedScores(posts, {
+      getEngagement: (p) => p.likesCount + p.commentsCount + (p.videoViewCount ?? 0) / 10,
+      getPostedAt: (p) => p.postedAt,
+      getGroupKey: (p) => p.username,
+    });
+    const orderedPosts =
+      sortBy === "normalized"
+        ? [...posts].sort(
+            (a, b) => (scores.get(b)!.outlierRatio ?? -Infinity) - (scores.get(a)!.outlierRatio ?? -Infinity)
+          )
+        : posts;
+
     const lastScrapedAt = posts.reduce((max, p) => (p.scrapedAt > max ? p.scrapedAt : max), posts[0].scrapedAt);
     res.json({
       status: "ok",
       accounts: watchedAccounts.map((a) => a.username),
       lastScrapedAt: lastScrapedAt.toISOString(),
-      posts: posts.map((p) => ({
-        id: p.id,
-        url: p.url,
-        type: p.type,
-        caption: p.caption,
-        imageUrl: p.imageUrl,
-        videoUrl: p.videoUrl,
-        isReel: p.isReel,
-        likesCount: p.likesCount,
-        commentsCount: p.commentsCount,
-        videoViewCount: p.videoViewCount,
-        username: p.username,
-        timestamp: p.postedAt?.toISOString() ?? "",
-      })),
+      posts: orderedPosts.map((p) => {
+        const score = scores.get(p)!;
+        return {
+          id: p.id,
+          url: p.url,
+          type: p.type,
+          caption: p.caption,
+          imageUrl: p.imageUrl,
+          videoUrl: p.videoUrl,
+          isReel: p.isReel,
+          likesCount: p.likesCount,
+          commentsCount: p.commentsCount,
+          videoViewCount: p.videoViewCount,
+          username: p.username,
+          timestamp: p.postedAt?.toISOString() ?? "",
+          dailyRate: score.dailyRate,
+          outlierRatio: score.outlierRatio,
+          isMature: score.isMature,
+          // Below MIN_RELIABLE_SAMPLE_SIZE mature posts for this account, the
+          // median outlierRatio is measured against is too thin to trust -
+          // the frontend shows "za mało danych" instead of a specific number.
+          isRatioReliable: score.isMature && score.sampleSize >= MIN_RELIABLE_SAMPLE_SIZE,
+          accountSampleSize: score.sampleSize,
+          topic: p.topic,
+          format: p.format,
+          hook: p.hook,
+        };
+      }),
     });
-  })
-);
-
-// Latest AI engagement analysis, generated at the end of each scrape run.
-router.get(
-  "/analysis",
-  asyncHandler(async (_req, res) => {
-    const latest = await prisma.inspirationAnalysis.findFirst({
-      where: { source: "instagram" },
-      orderBy: { createdAt: "desc" },
-    });
-    if (!latest) {
-      return res.json({ status: "pending", message: "Analiza pojawi się po pierwszym pobraniu postów." });
-    }
-    res.json({ status: "ok", content: latest.content, createdAt: latest.createdAt.toISOString() });
   })
 );
 

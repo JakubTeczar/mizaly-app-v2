@@ -19,7 +19,12 @@ const SCRAPER_DIR = path.join(__dirname, "..", "..", "..", "instagram-scraper");
 const SCRAPER_ENTRYPOINT = path.join(SCRAPER_DIR, "run_scrapedo.py");
 const PYTHON_BIN = process.env.PYTHON_BIN || "python3";
 
-export const POSTS_PER_ACCOUNT = 5;
+// Bumped from 5 - the classification ranking and outlier-ratio median both
+// need enough accumulated history per account to be statistically meaningful
+// (see MIN_RELIABLE_SAMPLE_SIZE in lib/engagementNormalization.ts and
+// MIN_GROUP_SIZE in ClassificationRanking.tsx), and 5-per-day was too thin to
+// reach that in a reasonable number of days.
+export const POSTS_PER_ACCOUNT = 20;
 
 // Default seed for WatchedInstagramAccount (see lib/watchlistSeed.ts) - fitness
 // niche, brand accounts (not individuals) for reliable public scraping. The
@@ -92,10 +97,15 @@ function runScraper(username: string, postsCount: number): Promise<string> {
 // Scrapes each account's recent posts one at a time (rather than one Apify
 // actor run for all accounts) so a single account failing (private/renamed/
 // deleted) doesn't lose every other account's results in the same run.
-export async function scrapeInstagramAccounts(usernames: string[]): Promise<ScrapedPost[]> {
+export async function scrapeInstagramAccounts(
+  usernames: string[],
+  onProgress?: (username: string, doneSoFar: number) => void
+): Promise<ScrapedPost[]> {
   const results: ScrapedPost[] = [];
 
-  for (const username of usernames) {
+  for (let i = 0; i < usernames.length; i++) {
+    const username = usernames[i];
+    onProgress?.(username, i);
     let stdout: string;
     try {
       stdout = await runScraper(username, POSTS_PER_ACCOUNT);

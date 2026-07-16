@@ -10,6 +10,7 @@
 // domain), so objects are streamed back to the app through
 // routes/inspirationMedia.ts rather than linked to directly.
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 
 const ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -41,6 +42,17 @@ function getClient(): S3Client {
       region: "auto",
       endpoint: ENDPOINT,
       credentials: { accessKeyId: ACCESS_KEY_ID!, secretAccessKey: SECRET_ACCESS_KEY! },
+      // Without an explicit timeout, a socket that goes stale mid-request (seen
+      // in practice under the concurrent PutObject traffic from the scrape
+      // jobs) hangs forever instead of erroring - the frontend then shows a
+      // broken image/video that never finishes loading. maxSockets raised from
+      // the SDK default (50) since scraping and page views share this client.
+      requestHandler: new NodeHttpHandler({
+        connectionTimeout: 5_000,
+        requestTimeout: 15_000,
+        socketTimeout: 15_000,
+        httpsAgent: { maxSockets: 100 },
+      }),
     });
   }
   return client;

@@ -19,16 +19,16 @@
 // by this change - they just stay as they were until re-scraped some other
 // way.)
 //
-// Also generates a section-level AI insight analysis after each run (see
-// lib/contentInsights.ts), same "InspirationAnalysis" table Instagram uses
-// (source: "youtube").
+// Also classifies each unclassified video's topic/format/hook after each run
+// (see lib/contentClassification.ts) so Inspiracje can rank by them.
 //
 // Scheduling mirrors jobs/inspirationScrapeJob.ts: staleness-based rather
 // than a fixed cron expression, so it survives restarts without double-running.
 
+import type { ScrapeProgress } from "@mizaly/shared";
 import { prisma } from "../lib/prisma";
 import { fetchVideoDetails, listRecentVideos } from "../integrations/youtube";
-import { generateYoutubeInsights } from "../lib/contentInsights";
+import { classifyUnclassifiedYoutubeVideos } from "../lib/contentClassification";
 
 const SCRAPE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const CHECK_EVERY_MS = 60 * 60 * 1000;
@@ -36,6 +36,7 @@ const BACKFILL_VIDEO_LIMIT = 50;
 const INCREMENTAL_VIDEO_LIMIT = 10;
 
 let isRunning = false;
+let progress: { total: number; done: number; current: string | null } = { total: 0, done: 0, current: null };
 
 // Exposed so routes/youtubeVideos.ts's manual "pobierz teraz" endpoint can
 // avoid kicking off a second overlapping run if the hourly scheduler (or a
@@ -44,13 +45,22 @@ export function isYoutubeScrapeRunning(): boolean {
   return isRunning;
 }
 
+// Exposed so the frontend can poll and show "Pobrano X z Y kanałów" while a
+// scrape (manual or hourly-scheduled) is in progress.
+export function getYoutubeScrapeProgress(): ScrapeProgress {
+  return { isRunning, ...progress };
+}
+
 export async function runYoutubeScrapeJob(): Promise<void> {
   if (isRunning) return;
   isRunning = true;
   console.log("[youtube-job] Starting YouTube scrape...");
   try {
     const channels = await prisma.watchedYoutubeChannel.findMany();
-    for (const channel of channels) {
+    progress = { total: channels.length, done: 0, current: null };
+    for (let i = 0; i < channels.length; i++) {
+      const channel = channels[i];
+      progress = { ...progress, current: channel.displayName ?? `@${channel.handle}` };
       try {
         const existingIds = new Set(
           (
@@ -107,13 +117,15 @@ export async function runYoutubeScrapeJob(): Promise<void> {
       } catch (err) {
         console.error(`[youtube-job] Failed to list videos for channel @${channel.handle}:`, err);
       }
+      progress = { ...progress, done: i + 1 };
     }
+    progress = { ...progress, current: null };
     console.log("[youtube-job] Scrape finished.");
 
     try {
-      await generateYoutubeInsights();
+      await classifyUnclassifiedYoutubeVideos();
     } catch (err) {
-      console.error("[youtube-job] AI insights generation failed:", err);
+      console.error("[youtube-job] Content classification failed:", err);
     }
   } catch (err) {
     console.error("[youtube-job] Scrape failed:", err);

@@ -2,6 +2,13 @@ import { useEffect, useState } from "react";
 import type { AnalyticsSummary } from "@mizaly/shared";
 import { apiClient, ApiError } from "../lib/apiClient";
 import { platformLabel } from "../lib/platformLabels";
+import { FEATURE_FLAGS } from "../lib/featureFlags";
+import { AnalyticsLineChart } from "../components/AnalyticsLineChart";
+
+type ChartRange = "week" | "month" | "quarter";
+
+const RANGE_DAYS: Record<ChartRange, number> = { week: 7, month: 30, quarter: 90 };
+const RANGE_LABELS: Record<ChartRange, string> = { week: "Tydzień", month: "Miesiąc", quarter: "Kwartał" };
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Szkic",
@@ -35,6 +42,8 @@ export function AnalitykePage() {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [chartRange, setChartRange] = useState<ChartRange>("week");
+  const [isPlatformsOpen, setIsPlatformsOpen] = useState(false);
 
   useEffect(() => {
     apiClient
@@ -81,52 +90,44 @@ export function AnalitykePage() {
             </div>
           </div>
 
-          {summary.daily.length > 0 && (
+          {summary.daily.length > 1 && (
             <section className="card">
-              <h2>Wyświetlenia dziennie</h2>
-              <div className="chart-bars">
-                {summary.daily.slice(-14).map((day) => {
-                  const max = Math.max(...summary.daily.slice(-14).map((d) => d.impressions), 1);
-                  const heightPercent = Math.max((day.impressions / max) * 100, day.impressions > 0 ? 4 : 0);
-                  return (
-                    <div key={day.date} className="chart-bar-col">
-                      <div className="chart-bar-count">{day.impressions > 0 ? formatNumber(day.impressions) : ""}</div>
-                      <div className="chart-bar-wrap">
-                        <div
-                          className={`chart-bar${day.impressions === 0 ? " chart-bar--empty" : ""}`}
-                          style={{ height: `${heightPercent}%` }}
-                        />
-                      </div>
-                      <div className="chart-bar-label">{formatDayLabel(day.date)}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          {summary.platforms.length > 0 && (
-            <section className="card">
-              <h2>Konta i platformy</h2>
-              <div className="stat-rows">
-                {summary.platforms.map((platform) => (
-                  <div key={platform.platform} className="stat-row">
-                    <div className="stat-row-label">
-                      {platformLabel(platform.platform)}
-                      <div className="hint-text">
-                        {platform.postsPerWeek} postów/tydz., {formatPercent(platform.avgEngagementRate)} zaangażowania
-                      </div>
-                    </div>
-                    <div className="stat-row-value">
-                      {platform.followersCount !== null ? formatNumber(platform.followersCount) : "-"}
-                    </div>
-                  </div>
+              <h2>Wyświetlenia</h2>
+              <div className="sub-tabs">
+                {(Object.keys(RANGE_LABELS) as ChartRange[]).map((range) => (
+                  <button
+                    key={range}
+                    type="button"
+                    className={chartRange === range ? "active" : ""}
+                    onClick={() => setChartRange(range)}
+                  >
+                    {RANGE_LABELS[range]}
+                  </button>
                 ))}
               </div>
+              <AnalyticsLineChart
+                key={chartRange}
+                points={summary.daily.slice(-RANGE_DAYS[chartRange]).map((day) => ({
+                  date: day.date,
+                  value: day.impressions,
+                }))}
+                formatValue={formatNumber}
+                formatDate={formatDayLabel}
+              />
             </section>
           )}
 
-          {summary.recentPosts.length > 0 && (
+          {summary.recentPosts.length > 0 && FEATURE_FLAGS.analitykaOstatniePosty && (
+            <section className="card">
+              <div className="card-header-row">
+                <h2>Ostatnie posty</h2>
+                <span className="badge-coming-soon">Wkrótce</span>
+              </div>
+              <p className="card-muted-text">Ta funkcja będzie dostępna wkrótce.</p>
+            </section>
+          )}
+
+          {summary.recentPosts.length > 0 && !FEATURE_FLAGS.analitykaOstatniePosty && (
             <section className="card">
               <h2>Ostatnie posty</h2>
               <div className="list">
@@ -153,6 +154,50 @@ export function AnalitykePage() {
                   </div>
                 ))}
               </div>
+            </section>
+          )}
+
+          {summary.platforms.length > 0 && (
+            <section className="card collapsible-card">
+              <button
+                type="button"
+                className="collapsible-toggle"
+                aria-expanded={isPlatformsOpen}
+                onClick={() => setIsPlatformsOpen((prev) => !prev)}
+              >
+                <span>Konta i platformy</span>
+                <svg
+                  className={`collapsible-chevron${isPlatformsOpen ? " open" : ""}`}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+              {isPlatformsOpen && (
+                <div className="collapsible-body">
+                  <div className="stat-rows">
+                    {summary.platforms.map((platform) => (
+                      <div key={platform.platform} className="stat-row">
+                        <div className="stat-row-label">
+                          {platformLabel(platform.platform)}
+                          <div className="hint-text">
+                            {platform.postsPerWeek} postów/tydz., {formatPercent(platform.avgEngagementRate)} zaangażowania
+                          </div>
+                        </div>
+                        <div className="stat-row-value">
+                          {platform.followersCount !== null ? formatNumber(platform.followersCount) : "-"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
           )}
 

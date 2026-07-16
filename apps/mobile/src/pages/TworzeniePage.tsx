@@ -5,6 +5,7 @@ import { PostSection } from "./tworzenie/PostSection";
 import { StronaSection } from "./tworzenie/StronaSection";
 import { ReelsSection } from "./tworzenie/ReelsSection";
 import { IconKalendarz, IconPost, IconReels, IconStrona } from "./tworzenie/TworzenieIcons";
+import { FEATURE_FLAGS } from "../lib/featureFlags";
 
 type SectionKey = "kalendarz" | "post" | "strona" | "reels";
 
@@ -14,6 +15,8 @@ interface SectionDef {
   sublabel: string;
   Icon: ComponentType<{ className?: string }>;
   Component: ComponentType;
+  /** Funkcja tymczasowo zablokowana - widoczna w hubie jako "Wkrótce", niedostępna do otwarcia. */
+  comingSoon?: boolean;
 }
 
 const SECTIONS: SectionDef[] = [
@@ -37,6 +40,7 @@ const SECTIONS: SectionDef[] = [
     sublabel: "Artykuł na Twoją stronę",
     Icon: IconStrona,
     Component: StronaSection,
+    comingSoon: FEATURE_FLAGS.tworzenieStrona,
   },
   {
     key: "reels",
@@ -44,6 +48,7 @@ const SECTIONS: SectionDef[] = [
     sublabel: "Wideo na social media",
     Icon: IconReels,
     Component: ReelsSection,
+    comingSoon: FEATURE_FLAGS.tworzenieReels,
   },
 ];
 
@@ -51,7 +56,7 @@ export function TworzeniePage() {
   // Kept in the URL (?sekcja=...) so an open section is shareable/bookmarkable.
   const [searchParams, setSearchParams] = useSearchParams();
   const activeKey = searchParams.get("sekcja") as SectionKey | null;
-  const activeSection = SECTIONS.find((section) => section.key === activeKey) ?? null;
+  const activeSection = SECTIONS.find((section) => section.key === activeKey && !section.comingSoon) ?? null;
 
   const openSection = (key: SectionKey) => setSearchParams({ sekcja: key });
   const closeSection = () => setSearchParams({});
@@ -85,7 +90,9 @@ export function TworzeniePage() {
             type="button"
             className="tworzenie-tile"
             onClick={() => openSection(section.key)}
+            disabled={section.comingSoon}
           >
+            {section.comingSoon && <span className="badge-coming-soon badge-coming-soon--corner">Wkrótce</span>}
             <section.Icon className="tworzenie-tile-icon" />
             <span className="tworzenie-tile-label">{section.label}</span>
             <span className="tworzenie-tile-sub">{section.sublabel}</span>

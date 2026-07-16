@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ScrapeProgress,
   WatchedYoutubeChannel,
   YoutubeAnalysisAction,
   YoutubeVideoDetail,
@@ -7,7 +8,7 @@ import type {
 } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
 import { WatchlistManager } from "./WatchlistManager";
-import { AiInsightCard } from "./AiInsightCard";
+import { ClassificationRanking } from "./ClassificationRanking";
 import { TopMetricsStrip } from "./TopMetricsStrip";
 import { SortControl } from "./SortControl";
 
@@ -32,6 +33,7 @@ const SORT_OPTIONS = [
   { value: "views", label: "Najwięcej wyświetleń" },
   { value: "likes", label: "Najwięcej polubień" },
   { value: "comments", label: "Najwięcej komentarzy" },
+  { value: "normalized", label: "Odchylenie od normy kanału" },
 ];
 
 const ANALYSIS_ACTIONS: { id: YoutubeAnalysisAction; label: string }[] = [
@@ -132,6 +134,8 @@ export function YoutubeSection() {
 
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState("date");
+  const [scrapeProgress, setScrapeProgress] = useState<ScrapeProgress | null>(null);
+  const wasScrapeRunningRef = useRef(false);
 
   const loadVideos = async (sort: string) => {
     try {
@@ -155,20 +159,50 @@ export function YoutubeSection() {
     loadVideos(sortBy).finally(() => setVideosLoading(false));
   }, [sortBy]);
 
+  // Polls the scrape status (shared by the manual "Pobierz teraz" click and
+  // the hourly background job - see jobs/youtubeScrapeJob.ts) so the
+  // "Pobrano X z Y kanałów" banner reflects a scrape started from either source.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const status = await apiClient.get<ScrapeProgress>("/api/youtube-videos/scrape-status");
+        if (cancelled) return;
+        setScrapeProgress(status);
+        if (wasScrapeRunningRef.current && !status.isRunning) {
+          loadVideos(sortBy);
+        }
+        wasScrapeRunningRef.current = status.isRunning;
+      } catch {
+        // non-critical - status polling failure shouldn't block the page
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [sortBy]);
+
   const lastScrapedAt = videos.reduce<string | null>(
     (max, v) => (!max || v.scrapedAt > max ? v.scrapedAt : max),
     null
   );
 
+  // Ranked by outlierRatio (how far a video deviates from its OWN channel's
+  // usual pace), not raw views - a plain "most views" top 3 is dominated by
+  // whichever channel is biggest/oldest, not by what's actually unusual.
   const topVideos = useMemo(
     () =>
       [...videos]
-        .sort((a, b) => b.viewCount - a.viewCount)
+        .filter((video) => typeof video.outlierRatio === "number")
+        .sort((a, b) => (b.outlierRatio as number) - (a.outlierRatio as number))
         .slice(0, 3)
         .map((video) => ({
           id: video.id,
           title: video.title,
-          valueLabel: `${formatCount(video.viewCount)} wyświetleń`,
+          valueLabel: `${(video.outlierRatio as number).toFixed(1)}x normy @${video.channelHandle}`,
           thumbnailUrl: video.thumbnailUrl,
           onClick: () => setSelectedVideoId(video.id),
         })),
@@ -220,8 +254,8 @@ export function YoutubeSection() {
         onRemove={handleRemoveChannel}
       />
 
-      <AiInsightCard endpoint="/api/youtube-videos/insights" />
-      <TopMetricsStrip heading="Top 3 filmy" items={topVideos} />
+      <ClassificationRanking items={videos} />
+      <TopMetricsStrip heading="Top 3 - odchylenie od normy kanału" items={topVideos} />
 
       <section className="card">
         <div className="card-header-row">
@@ -230,7 +264,13 @@ export function YoutubeSection() {
             {isScraping ? "Pobieranie…" : "Pobierz teraz"}
           </button>
         </div>
-        {lastScrapedAt && (
+        {scrapeProgress?.isRunning && (
+          <p className="hint-text" style={{ marginBottom: 10 }}>
+            Pobieranie w tle. Pobrano {scrapeProgress.done} z {scrapeProgress.total} kanałów
+            {scrapeProgress.current ? ` (aktualnie: ${scrapeProgress.current})` : ""}.
+          </p>
+        )}
+        {!scrapeProgress?.isRunning && lastScrapedAt && (
           <p className="hint-text" style={{ marginBottom: 10 }}>
             Ostatnio pobrano: {formatDateTime(lastScrapedAt)}
           </p>
@@ -259,6 +299,13 @@ export function YoutubeSection() {
                     <span>{formatCount(video.likeCount)} lajków</span>
                     <span>{formatCount(video.commentCount)} kom.</span>
                   </div>
+                  {video.isMature === false ? (
+                    <span className="outlier-badge outlier-badge--immature">jeszcze rośnie</span>
+                  ) : (
+                    typeof video.outlierRatio === "number" && (
+                      <span className="outlier-badge">{video.outlierRatio.toFixed(1)}x normy kanału</span>
+                    )
+                  )}
                   {video.publishedAt && <span className="insta-post-date">{formatDate(video.publishedAt)}</span>}
                 </div>
               </button>

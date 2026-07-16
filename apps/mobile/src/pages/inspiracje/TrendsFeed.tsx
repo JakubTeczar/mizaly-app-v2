@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import type { InspirationItem } from "@mizaly/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { InspirationItem, ScrapeProgress } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import { TopMetricsStrip } from "./TopMetricsStrip";
 import { SortControl } from "./SortControl";
+import { ClassificationRanking } from "./ClassificationRanking";
 
 interface InstagramPost {
   id: string;
@@ -18,6 +19,19 @@ interface InstagramPost {
   videoViewCount: number | null;
   username: string;
   timestamp: string;
+  // Engagement per day since posting, normalized against this account's own
+  // median (see lib/engagementNormalization.ts on the backend).
+  dailyRate?: number;
+  outlierRatio?: number | null;
+  isMature?: boolean;
+  // False when the account has too few mature posts for outlierRatio's
+  // median to mean anything - see MIN_RELIABLE_SAMPLE_SIZE on the backend.
+  isRatioReliable?: boolean;
+  accountSampleSize?: number;
+  // Set by lib/contentClassification.ts on the backend - null until classified.
+  topic?: string | null;
+  format?: string | null;
+  hook?: string | null;
 }
 
 interface TrendsResponse {
@@ -48,6 +62,7 @@ const SORT_OPTIONS = [
   { value: "likes", label: "Najwięcej polubień" },
   { value: "comments", label: "Najwięcej komentarzy" },
   { value: "views", label: "Najwięcej wyświetleń" },
+  { value: "normalized", label: "Odchylenie od normy konta" },
 ];
 
 // Saved-post callback lets the parent page prepend the new item to the
@@ -63,7 +78,9 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
   const [lastScrapedAt, setLastScrapedAt] = useState<string | null>(null);
   const [isScraping, setIsScraping] = useState(false);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState("date");
+  const [sortBy, setSortBy] = useState("normalized");
+  const [scrapeProgress, setScrapeProgress] = useState<ScrapeProgress | null>(null);
+  const wasScrapeRunningRef = useRef(false);
 
   const loadTrends = async (sort: string) => {
     try {
@@ -84,15 +101,45 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
     loadTrends(sortBy).finally(() => setIsLoading(false));
   }, [sortBy]);
 
+  // Polls the scrape status (shared by the manual "Pobierz teraz" click and
+  // the hourly background job - see jobs/inspirationScrapeJob.ts) so the
+  // "Pobrano X z Y kont" banner reflects a scrape started from either source.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const status = await apiClient.get<ScrapeProgress>("/api/inspiration/scrape-status");
+        if (cancelled) return;
+        setScrapeProgress(status);
+        if (wasScrapeRunningRef.current && !status.isRunning) {
+          loadTrends(sortBy);
+        }
+        wasScrapeRunningRef.current = status.isRunning;
+      } catch {
+        // non-critical - status polling failure shouldn't block the page
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [sortBy]);
+
+  // Ranked by outlierRatio (how far a post deviates from its OWN account's
+  // usual pace), not raw likes - a plain "most likes" top 3 is dominated by
+  // whichever account is biggest/oldest, not by what's actually unusual.
   const topPosts = useMemo(
     () =>
       [...posts]
-        .sort((a, b) => b.likesCount - a.likesCount)
+        .filter((post) => typeof post.outlierRatio === "number" && post.isRatioReliable)
+        .sort((a, b) => (b.outlierRatio as number) - (a.outlierRatio as number))
         .slice(0, 3)
         .map((post) => ({
           id: post.id,
-          title: post.caption ? post.caption.slice(0, 60) : `@${post.username}`,
-          valueLabel: `${formatCount(post.likesCount)} polubień`,
+          title: post.caption ? post.caption.slice(0, 140) : `@${post.username}`,
+          valueLabel: `${(post.outlierRatio as number).toFixed(1)}x normy @${post.username}`,
           thumbnailUrl: post.imageUrl,
           onClick: () => setLightboxPost(post),
         })),
@@ -131,7 +178,8 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
 
   return (
     <>
-      <TopMetricsStrip heading="Top 3 posty" items={topPosts} />
+      <ClassificationRanking items={posts} />
+      <TopMetricsStrip heading="Top 3 - odchylenie od normy konta" items={topPosts} />
 
       <section className="card">
         <div className="card-header-row">
@@ -140,7 +188,13 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
             {isScraping ? "Pobieranie…" : "Pobierz teraz"}
           </button>
         </div>
-        {lastScrapedAt && (
+        {scrapeProgress?.isRunning && (
+          <p className="hint-text" style={{ marginBottom: 10 }}>
+            Pobieranie w tle. Pobrano {scrapeProgress.done} z {scrapeProgress.total} kont
+            {scrapeProgress.current ? ` (aktualnie: @${scrapeProgress.current})` : ""}.
+          </p>
+        )}
+        {!scrapeProgress?.isRunning && lastScrapedAt && (
           <p className="hint-text" style={{ marginBottom: 10 }}>
             Ostatnio pobrano: {formatDateTime(lastScrapedAt)}
           </p>
@@ -185,6 +239,17 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
                     <span>{formatCount(post.videoViewCount)} wyświetleń</span>
                   )}
                 </div>
+                {post.isMature === false ? (
+                  <span className="outlier-badge outlier-badge--immature">jeszcze rośnie</span>
+                ) : post.isRatioReliable && typeof post.outlierRatio === "number" ? (
+                  <span className="outlier-badge">{post.outlierRatio.toFixed(1)}x normy konta</span>
+                ) : (
+                  typeof post.accountSampleSize === "number" && (
+                    <span className="outlier-badge outlier-badge--immature">
+                      za mało danych tego konta ({post.accountSampleSize}/10 postów)
+                    </span>
+                  )
+                )}
                 <div className="insta-post-actions">
                   <a href={post.url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-small">
                     Zobacz na Instagramie
@@ -208,6 +273,7 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
         <ImageLightbox
           src={lightboxPost.imageUrl}
           alt={`Post @${lightboxPost.username}`}
+          caption={lightboxPost.caption || undefined}
           onClose={() => setLightboxPost(null)}
         />
       )}

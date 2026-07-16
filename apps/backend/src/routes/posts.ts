@@ -10,18 +10,31 @@ import { ensureZernioProfileId } from "../integrations/zernioProfile";
 import { resolveZernioApiKey } from "../integrations/zernioApiKeys";
 import { uploadMedia } from "../integrations/cloudinary";
 import { buildStoryHtml } from "../media/storyTemplate";
-import { buildCarouselSlideHtml } from "../media/carouselTemplate";
 import { renderHtmlToJpeg } from "../media/render";
 
 const router = Router();
 
 router.use(requireAuth);
 
+// Carousel slides are rendered client-side (react-konva) - the backend just
+// stores the layout JSON (for re-editing) alongside the exported image URLs
+// that actually get published, see mediaUrls above.
+const carouselTextLayerSchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  fontSize: z.number(),
+  fontFamily: z.string(),
+  color: z.string(),
+  align: z.enum(["left", "center", "right"]),
+});
+
 const carouselSlideSchema = z.object({
   order: z.number(),
-  heading: z.string().optional(),
-  text: z.string().optional(),
   backgroundImageUrl: z.string().optional(),
+  textLayers: z.array(carouselTextLayerSchema).default([]),
 });
 
 const createPostSchema = z.object({
@@ -174,29 +187,6 @@ router.post(
       content: data.content || "",
       label: data.storyTemplate === "series" ? data.seriesName?.trim() || "SERIA" : undefined,
     });
-
-    res.json({ dataUrl: `data:image/jpeg;base64,${buffer.toString("base64")}` });
-  })
-);
-
-const carouselSlidePreviewSchema = z.object({
-  backgroundImageUrl: z.string().optional(),
-  heading: z.string().optional(),
-  text: z.string().optional(),
-});
-
-// On-demand render of a single carousel slide for the slide editor's live
-// preview - same shape as /story-preview above, doesn't touch the database
-// or Cloudinary. The slide editor calls this once per slide; the actual
-// upload into mediaUrls only happens when the user saves the carousel (see
-// PostSection.tsx).
-router.post(
-  "/carousel-slide-preview",
-  asyncHandler(async (req, res) => {
-    const data = carouselSlidePreviewSchema.parse(req.body);
-
-    const html = buildCarouselSlideHtml(data);
-    const buffer = await renderHtmlToJpeg(html, { width: 1080, height: 1080 });
 
     res.json({ dataUrl: `data:image/jpeg;base64,${buffer.toString("base64")}` });
   })

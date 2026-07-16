@@ -1,8 +1,29 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import type { CarouselSlide } from "@mizaly/shared";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
+import { Stage, Layer, Rect, Image as KonvaImage, Text as KonvaText, Transformer } from "react-konva";
+import useImage from "use-image";
+import type Konva from "konva";
+import type { CarouselSlide, CarouselTextFontFamily, CarouselTextLayer } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
 import { fileToDataUrl } from "../../lib/imageCrop";
 import { Modal } from "../../components/Modal";
+
+// Slides are always exported at 1080x1080 (Instagram's carousel size). Text
+// layers store their x/y/width/fontSize in that same fixed coordinate space
+// regardless of how big the on-screen canvas actually is, so a layout looks
+// identical on a 320px phone and a 480px tablet - only the live display
+// scale (see useContainerWidth) changes, never the stored numbers.
+const MODEL_SIZE = 1080;
+const FALLBACK_BACKGROUND = "#1f1633";
+const FONT_OPTIONS: CarouselTextFontFamily[] = ["Montserrat", "Bebas Neue", "Gantari"];
 
 interface CarouselSlideEditorProps {
   initialSlides: CarouselSlide[];
@@ -15,16 +36,274 @@ interface SlideRow {
   slide: CarouselSlide;
 }
 
-async function renderSlidePreview(slide: CarouselSlide): Promise<string> {
-  const result = await apiClient.post<{ dataUrl: string }>("/api/posts/carousel-slide-preview", {
-    backgroundImageUrl: slide.backgroundImageUrl,
-    heading: slide.heading,
-    text: slide.text,
-  });
-  return result.dataUrl;
+function createTextLayer(existingCount: number): CarouselTextLayer {
+  return {
+    id: crypto.randomUUID(),
+    content: "Nowy tekst",
+    x: MODEL_SIZE / 2 - 300,
+    y: MODEL_SIZE / 2 - 50 + existingCount * 90,
+    width: 600,
+    fontSize: 80,
+    fontFamily: "Montserrat",
+    color: "#ffffff",
+    align: "center",
+  };
 }
 
-interface SlideEditorCardProps {
+// Measures a wrapper's live rendered width so the canvas can be a responsive
+// square (fits a narrow phone and a wide tablet alike) while the model
+// coordinates above stay fixed - see MODEL_SIZE.
+function useContainerWidth() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.clientWidth);
+    const observer = new ResizeObserver((entries) => setWidth(entries[0].contentRect.width));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return { ref, width };
+}
+
+function SlideBackgroundImage({ url, displaySize }: { url: string; displaySize: number }) {
+  const [image] = useImage(url, "anonymous");
+
+  const crop = useMemo(() => {
+    if (!image) return null;
+    // Center-crop to a square from whichever dimension is larger, matching
+    // CSS object-fit: cover, since the target is always a 1:1 slide.
+    if (image.width >= image.height) {
+      const size = image.height;
+      return { x: (image.width - size) / 2, y: 0, width: size, height: size };
+    }
+    const size = image.width;
+    return { x: 0, y: (image.height - size) / 2, width: size, height: size };
+  }, [image]);
+
+  if (!image || !crop) return null;
+  return <KonvaImage image={image} x={0} y={0} width={displaySize} height={displaySize} crop={crop} />;
+}
+
+export interface SlideCanvasEditorHandle {
+  exportDataUrl: () => string;
+}
+
+interface SlideCanvasEditorProps {
+  slide: CarouselSlide;
+  onChange: (patch: Partial<CarouselSlide>) => void;
+}
+
+const SlideCanvasEditor = forwardRef<SlideCanvasEditorHandle, SlideCanvasEditorProps>(function SlideCanvasEditor(
+  { slide, onChange },
+  ref
+) {
+  const { ref: containerRef, width: displaySize } = useContainerWidth();
+  const stageRef = useRef<Konva.Stage>(null);
+  const trRef = useRef<Konva.Transformer>(null);
+  const textNodeRefs = useRef<Record<string, Konva.Text | null>>({});
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+
+  const scale = displaySize > 0 ? displaySize / MODEL_SIZE : 0;
+
+  // A canvas never repaints on its own once a @font-face finishes loading
+  // after first paint, unlike DOM text - force one redraw when fonts settle
+  // so an export triggered right away doesn't bake in the fallback font.
+  useEffect(() => {
+    document.fonts?.ready?.then(() => {
+      stageRef.current?.getLayers().forEach((layer) => layer.batchDraw());
+    });
+  }, []);
+
+  useEffect(() => {
+    const node = selectedId ? textNodeRefs.current[selectedId] : null;
+    trRef.current?.nodes(node ? [node] : []);
+    trRef.current?.getLayer()?.batchDraw();
+  }, [selectedId, slide.textLayers]);
+
+  useImperativeHandle(ref, () => ({
+    exportDataUrl: () => {
+      // Deselecting imperatively (not via setState) so the selection
+      // handles are gone from the very next paint, before toDataURL runs -
+      // waiting on a React re-render here would risk exporting them too.
+      trRef.current?.nodes([]);
+      trRef.current?.getLayer()?.batchDraw();
+      return stageRef.current!.toDataURL({
+        pixelRatio: MODEL_SIZE / displaySize,
+        mimeType: "image/jpeg",
+        quality: 0.92,
+      });
+    },
+  }));
+
+  const updateLayer = (id: string, patch: Partial<CarouselTextLayer>) => {
+    onChange({ textLayers: slide.textLayers.map((layer) => (layer.id === id ? { ...layer, ...patch } : layer)) });
+  };
+
+  const removeLayer = (id: string) => {
+    setSelectedId(null);
+    onChange({ textLayers: slide.textLayers.filter((layer) => layer.id !== id) });
+  };
+
+  const addLayer = () => {
+    const layer = createTextLayer(slide.textLayers.length);
+    onChange({ textLayers: [...slide.textLayers, layer] });
+    setSelectedId(layer.id);
+    setEditingId(layer.id);
+    setEditingValue(layer.content);
+  };
+
+  const startEditing = (layer: CarouselTextLayer) => {
+    setSelectedId(layer.id);
+    setEditingId(layer.id);
+    setEditingValue(layer.content);
+  };
+
+  const commitEditing = () => {
+    if (editingId) updateLayer(editingId, { content: editingValue || "Tekst" });
+    setEditingId(null);
+  };
+
+  const handleDragEnd = (layer: CarouselTextLayer, node: Konva.Text) => {
+    updateLayer(layer.id, { x: node.x() / scale, y: node.y() / scale });
+  };
+
+  const handleTransformEnd = (layer: CarouselTextLayer, node: Konva.Text) => {
+    const factor = node.scaleX();
+    node.scaleX(1);
+    node.scaleY(1);
+    updateLayer(layer.id, {
+      x: node.x() / scale,
+      y: node.y() / scale,
+      width: Math.max(60, layer.width * factor),
+      fontSize: Math.max(10, Math.round(layer.fontSize * factor)),
+    });
+  };
+
+  const selectedLayer = slide.textLayers.find((layer) => layer.id === selectedId) ?? null;
+  const isEditingSelected = editingId !== null && editingId === selectedId;
+  // Positioned from the data model, not the Konva node - a just-added
+  // layer's <Text> ref isn't attached yet on the render that first shows
+  // the edit overlay (refs only attach after commit), and the model is the
+  // authoritative position anyway (kept in sync by onDragEnd/onTransformEnd).
+  const editingLayer = isEditingSelected ? selectedLayer : null;
+
+  return (
+    <div>
+      <div className="carousel-slide-canvas-wrap" ref={containerRef}>
+        {displaySize > 0 && (
+          <Stage
+            ref={stageRef}
+            width={displaySize}
+            height={displaySize}
+            onMouseDown={(e) => {
+              if (e.target === e.target.getStage()) setSelectedId(null);
+            }}
+            onTouchStart={(e) => {
+              if (e.target === e.target.getStage()) setSelectedId(null);
+            }}
+          >
+            <Layer>
+              <Rect x={0} y={0} width={displaySize} height={displaySize} fill={FALLBACK_BACKGROUND} />
+              {slide.backgroundImageUrl && (
+                <SlideBackgroundImage url={slide.backgroundImageUrl} displaySize={displaySize} />
+              )}
+              {slide.textLayers.map((layer) => (
+                <KonvaText
+                  key={layer.id}
+                  ref={(node) => {
+                    textNodeRefs.current[layer.id] = node;
+                  }}
+                  text={layer.content}
+                  x={layer.x * scale}
+                  y={layer.y * scale}
+                  width={layer.width * scale}
+                  fontSize={layer.fontSize * scale}
+                  fontFamily={layer.fontFamily}
+                  fill={layer.color}
+                  align={layer.align}
+                  draggable
+                  visible={editingId !== layer.id}
+                  onClick={() => setSelectedId(layer.id)}
+                  onTap={() => setSelectedId(layer.id)}
+                  onDblClick={() => startEditing(layer)}
+                  onDblTap={() => startEditing(layer)}
+                  onDragEnd={(e) => handleDragEnd(layer, e.target as Konva.Text)}
+                  onTransformEnd={(e) => handleTransformEnd(layer, e.target as Konva.Text)}
+                />
+              ))}
+              {selectedId && !isEditingSelected && (
+                <Transformer ref={trRef} enabledAnchors={["top-left", "top-right", "bottom-left", "bottom-right"]} rotateEnabled={false} />
+              )}
+            </Layer>
+          </Stage>
+        )}
+
+        {editingLayer && (
+          <textarea
+            className="carousel-text-edit-overlay"
+            autoFocus
+            value={editingValue}
+            onChange={(e) => setEditingValue(e.target.value)}
+            onBlur={commitEditing}
+            style={{
+              left: editingLayer.x * scale,
+              top: editingLayer.y * scale,
+              width: editingLayer.width * scale,
+              fontSize: editingLayer.fontSize * scale,
+              fontFamily: editingLayer.fontFamily,
+              color: editingLayer.color,
+              textAlign: editingLayer.align,
+            }}
+          />
+        )}
+      </div>
+
+      <div className="carousel-canvas-toolbar">
+        <button type="button" className="btn btn-secondary btn-small" onClick={addLayer}>
+          + Dodaj tekst
+        </button>
+        {selectedLayer && !isEditingSelected && (
+          <>
+            <input
+              type="color"
+              className="carousel-color-swatch"
+              value={selectedLayer.color}
+              onChange={(e) => updateLayer(selectedLayer.id, { color: e.target.value })}
+              aria-label="Kolor tekstu"
+            />
+            <select
+              value={selectedLayer.fontFamily}
+              onChange={(e) => updateLayer(selectedLayer.id, { fontFamily: e.target.value as CarouselTextFontFamily })}
+              aria-label="Czcionka"
+            >
+              {FONT_OPTIONS.map((font) => (
+                <option key={font} value={font}>
+                  {font}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn-text"
+              onClick={() => removeLayer(selectedLayer.id)}
+              aria-label="Usuń tekst"
+            >
+              Usuń tekst
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+});
+
+interface SlideRowCardProps {
   index: number;
   slide: CarouselSlide;
   isFirst: boolean;
@@ -33,56 +312,14 @@ interface SlideEditorCardProps {
   onChange: (patch: Partial<CarouselSlide>) => void;
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
-  onPreviewChange: (dataUrl: string | null) => void;
 }
 
-// Owns its own debounced live preview, scoped to this one slide's fields -
-// editing slide 3 of 8 never waits on (or re-renders) the other 7, and a
-// freshly added blank slide renders its own preview automatically within the
-// debounce window without any "generate" button anywhere.
-function SlideEditorCard({
-  index,
-  slide,
-  isFirst,
-  isLast,
-  isOnly,
-  onChange,
-  onMove,
-  onRemove,
-  onPreviewChange,
-}: SlideEditorCardProps) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+const SlideRowCard = forwardRef<SlideCanvasEditorHandle, SlideRowCardProps>(function SlideRowCard(
+  { index, slide, isFirst, isLast, isOnly, onChange, onMove, onRemove },
+  ref
+) {
   const [isUploadingBackground, setIsUploadingBackground] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const requestId = useRef(0);
-
-  useEffect(() => {
-    const id = (requestId.current += 1);
-    setIsLoadingPreview(true);
-
-    const timeoutId = setTimeout(async () => {
-      try {
-        const dataUrl = await renderSlidePreview(slide);
-        if (requestId.current === id) {
-          setPreviewUrl(dataUrl);
-          onPreviewChange(dataUrl);
-        }
-      } catch (err) {
-        if (requestId.current === id) {
-          setError(err instanceof ApiError ? err.message : "Nie udało się wygenerować podglądu slajdu.");
-        }
-      } finally {
-        if (requestId.current === id) {
-          setIsLoadingPreview(false);
-        }
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slide.heading, slide.text, slide.backgroundImageUrl]);
 
   const handleBackgroundChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -120,60 +357,37 @@ function SlideEditorCard({
       </div>
 
       <div className="carousel-slide-editor__body">
-        <div className="field">
-          <label htmlFor={`slideHeading${index}`}>Nagłówek</label>
-          <input
-            id={`slideHeading${index}`}
-            type="text"
-            value={slide.heading ?? ""}
-            onChange={(e) => onChange({ heading: e.target.value })}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor={`slideText${index}`}>Tekst</label>
-          <textarea
-            id={`slideText${index}`}
-            value={slide.text ?? ""}
-            onChange={(e) => onChange({ text: e.target.value })}
-          />
-        </div>
-        <div className="field">
-          <label>Zdjęcie w tle (opcjonalnie)</label>
-          <label htmlFor={`slideBg${index}`} className="photo-picker-button">
-            {isUploadingBackground ? "Wgrywanie…" : slide.backgroundImageUrl ? "Zmień zdjęcie" : "Dodaj zdjęcie"}
-          </label>
-          <input
-            id={`slideBg${index}`}
-            type="file"
-            accept="image/*"
-            disabled={isUploadingBackground}
-            onChange={handleBackgroundChange}
-            style={{ display: "none" }}
-          />
-        </div>
+        <SlideCanvasEditor ref={ref} slide={slide} onChange={onChange} />
 
-        <div className="carousel-slide-preview-wrap">
-          {previewUrl && <img className="carousel-slide-preview" src={previewUrl} alt={`Podgląd slajdu ${index + 1}`} />}
-          {isLoadingPreview && <p className="hint-text">Generowanie podglądu…</p>}
-        </div>
+        <label
+          htmlFor={`slideBg${index}`}
+          className={`photo-action-btn${isUploadingBackground ? " photo-action-btn-disabled" : ""}`}
+          style={{ marginTop: 10 }}
+        >
+          {isUploadingBackground ? "Wgrywanie…" : slide.backgroundImageUrl ? "Zmień zdjęcie" : "Dodaj zdjęcie"}
+        </label>
+        <input
+          id={`slideBg${index}`}
+          type="file"
+          accept="image/*"
+          disabled={isUploadingBackground}
+          onChange={handleBackgroundChange}
+          style={{ display: "none" }}
+        />
         {error && <p className="error-text">{error}</p>}
       </div>
     </div>
   );
-}
+});
 
 export function CarouselSlideEditor({ initialSlides, onClose, onSave }: CarouselSlideEditorProps) {
   const nextRowId = useRef(0);
   const makeRow = (slide: CarouselSlide): SlideRow => ({ id: nextRowId.current++, slide });
 
   const [rows, setRows] = useState<SlideRow[]>(() =>
-    (initialSlides.length > 0 ? initialSlides : [{ order: 0, heading: "", text: "" }]).map(makeRow)
+    (initialSlides.length > 0 ? initialSlides : [{ order: 0, textLayers: [] }]).map(makeRow)
   );
-  // Latest rendered preview per row, reused at save time instead of
-  // re-rendering every slide from scratch - keyed by the row's stable id
-  // (not array index), so reordering slides never mixes up which preview
-  // belongs to which slide.
-  const previewsByRowId = useRef<Record<number, string>>({});
+  const editorRefs = useRef<Record<number, SlideCanvasEditorHandle | null>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -182,11 +396,11 @@ export function CarouselSlideEditor({ initialSlides, onClose, onSave }: Carousel
   };
 
   const addSlide = () => {
-    setRows((prev) => [...prev, makeRow({ order: prev.length, heading: "", text: "" })]);
+    setRows((prev) => [...prev, makeRow({ order: prev.length, textLayers: [] })]);
   };
 
   const removeSlide = (id: number) => {
-    delete previewsByRowId.current[id];
+    delete editorRefs.current[id];
     setRows((prev) => prev.filter((row) => row.id !== id));
   };
 
@@ -208,10 +422,8 @@ export function CarouselSlideEditor({ initialSlides, onClose, onSave }: Carousel
       const rendered: string[] = [];
       const uploaded: string[] = [];
       for (const row of rows) {
-        // Reuse the slide's already-generated live preview when it's ready;
-        // only re-render as a fallback if the user hits Save before that
-        // slide's debounce settled.
-        const dataUrl = previewsByRowId.current[row.id] ?? (await renderSlidePreview(row.slide));
+        const dataUrl = editorRefs.current[row.id]?.exportDataUrl();
+        if (!dataUrl) throw new Error("Nie udało się wygenerować obrazu slajdu.");
         rendered.push(dataUrl);
         const uploadResult = await apiClient.post<{ url: string }>("/api/media/upload", { dataUrl });
         uploaded.push(uploadResult.url);
@@ -226,15 +438,18 @@ export function CarouselSlideEditor({ initialSlides, onClose, onSave }: Carousel
   };
 
   return (
-    <Modal title="Generator karuzeli" onClose={onClose}>
+    <Modal title="Edytor karuzeli" onClose={onClose}>
       <p className="hint-text">
-        Dodaj slajdy z nagłówkiem, tekstem i opcjonalnym zdjęciem w tle - każdy slajd stanie się osobnym zdjęciem
-        karuzeli w tej samej kolejności. Podgląd każdego slajdu generuje się automatycznie w trakcie edycji.
+        Dodaj zdjęcie i tekst do każdego slajdu - przeciągnij tekst, żeby go przesunąć, złap za rożek, żeby zmienić
+        rozmiar, kliknij dwa razy, żeby edytować treść.
       </p>
 
       {rows.map((row, index) => (
-        <SlideEditorCard
+        <SlideRowCard
           key={row.id}
+          ref={(handle) => {
+            editorRefs.current[row.id] = handle;
+          }}
           index={index}
           slide={row.slide}
           isFirst={index === 0}
@@ -243,9 +458,6 @@ export function CarouselSlideEditor({ initialSlides, onClose, onSave }: Carousel
           onChange={(patch) => updateSlide(row.id, patch)}
           onMove={(direction) => moveSlide(row.id, direction)}
           onRemove={() => removeSlide(row.id)}
-          onPreviewChange={(dataUrl) => {
-            if (dataUrl) previewsByRowId.current[row.id] = dataUrl;
-          }}
         />
       ))}
 
