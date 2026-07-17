@@ -161,7 +161,19 @@ router.get(
           accountSampleSize: score.sampleSize,
           topic: p.topic,
           format: p.format,
-          hook: p.hook,
+          hookText: p.hookText,
+          hookVisual: p.hookVisual,
+          cta: p.cta,
+          ctaDetail: p.ctaDetail,
+          visualDescription: p.visualDescription,
+          visualText: p.visualText,
+          // Short excerpt only (not the full segments array with timestamps) -
+          // this is just for the Inspiracje UI to show "what the video said"
+          // when expanding a topic/hook group, not for re-deriving segments.
+          transcriptExcerpt:
+            p.transcript && typeof p.transcript === "object" && "text" in p.transcript
+              ? String((p.transcript as { text: unknown }).text).slice(0, 300)
+              : null,
         };
       }),
     });

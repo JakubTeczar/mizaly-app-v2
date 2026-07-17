@@ -9,8 +9,18 @@
 // The bucket is private (S3 API access only, no public r2.dev/custom
 // domain), so objects are streamed back to the app through
 // routes/inspirationMedia.ts rather than linked to directly.
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
+
+// Guardrails so scraping can't silently push huge files or blow past a
+// storage budget on Cloudflare R2 (billed per GB - see docs/Backlog.md).
+const MAX_MEDIA_SIZE_BYTES = 50 * 1024 * 1024; // 50MB per file
+const MAX_BUCKET_SIZE_BYTES = 8 * 1024 * 1024 * 1024; // 8GB total for this bucket
+// Listing every object to sum sizes is real work - don't do it before every
+// single upload in a scrape run (dozens of uploads/run). Cache it briefly and
+// keep it in sync in-memory as uploads happen; a full recount every 5 minutes
+// self-corrects any drift.
+const BUCKET_SIZE_CACHE_MS = 5 * 60 * 1000;
 
 const ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -66,11 +76,43 @@ function extensionFromContentType(contentType: string | null, fallback: "jpg" | 
   return fallback;
 }
 
+let cachedBucketSizeBytes: number | null = null;
+let cachedBucketSizeAt = 0;
+
+// Real total (sums every object's Size, paginated) - the only reliable source
+// since the bucket already had files in it before this budget existed, so an
+// in-memory counter starting at 0 would undercount. Cached/incremented
+// in-memory between calls (see BUCKET_SIZE_CACHE_MS) so this doesn't run a
+// full listing before every single upload in a scrape run.
+async function getBucketSizeBytes(): Promise<number> {
+  const now = Date.now();
+  if (cachedBucketSizeBytes !== null && now - cachedBucketSizeAt < BUCKET_SIZE_CACHE_MS) {
+    return cachedBucketSizeBytes;
+  }
+
+  let total = 0;
+  let continuationToken: string | undefined;
+  do {
+    const page = await getClient().send(
+      new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: OBJECT_PREFIX, ContinuationToken: continuationToken })
+    );
+    total += (page.Contents ?? []).reduce((sum, obj) => sum + (obj.Size ?? 0), 0);
+    continuationToken = page.NextContinuationToken;
+  } while (continuationToken);
+
+  cachedBucketSizeBytes = total;
+  cachedBucketSizeAt = now;
+  return total;
+}
+
 // Fetches `remoteUrl` server-side and uploads it to R2 under `id.<ext>`,
-// overwriting any previous copy (re-scrapes refresh the same post id).
-// `fallbackExt` picks the extension when Instagram doesn't send a usable
-// content-type. Returns the public path to request it back through
-// routes/inspirationMedia.ts, e.g. "/media/inspiration/123.jpg".
+// overwriting any previous copy (re-scrapes refresh the same post id). Throws
+// (caller already catches and falls back to the raw/possibly-broken URL
+// rather than dropping the post, see jobs/inspirationScrapeJob.ts) if the
+// file is over MAX_MEDIA_SIZE_BYTES or would push the bucket over
+// MAX_BUCKET_SIZE_BYTES. `fallbackExt` picks the extension when Instagram
+// doesn't send a usable content-type. Returns the public path to request it
+// back through routes/inspirationMedia.ts, e.g. "/media/inspiration/123.jpg".
 export async function saveMediaToR2(remoteUrl: string, id: string, fallbackExt: "jpg" | "mp4"): Promise<string> {
   const res = await fetch(remoteUrl);
   if (!res.ok) {
@@ -82,6 +124,21 @@ export async function saveMediaToR2(remoteUrl: string, id: string, fallbackExt: 
   const key = `${OBJECT_PREFIX}${id}.${ext}`;
   const buffer = Buffer.from(await res.arrayBuffer());
 
+  if (buffer.length > MAX_MEDIA_SIZE_BYTES) {
+    throw new Error(
+      `Plik przekracza limit ${MAX_MEDIA_SIZE_BYTES / (1024 * 1024)}MB ` +
+        `(${(buffer.length / (1024 * 1024)).toFixed(1)}MB): ${remoteUrl}`
+    );
+  }
+
+  const currentTotal = await getBucketSizeBytes();
+  if (currentTotal + buffer.length > MAX_BUCKET_SIZE_BYTES) {
+    throw new Error(
+      `Limit miejsca w R2 (${MAX_BUCKET_SIZE_BYTES / (1024 * 1024 * 1024)}GB) zostałby przekroczony ` +
+        `(obecnie ${(currentTotal / (1024 * 1024 * 1024)).toFixed(2)}GB) - pomijam upload dla ${id}.`
+    );
+  }
+
   await getClient().send(
     new PutObjectCommand({
       Bucket: BUCKET_NAME,
@@ -90,6 +147,8 @@ export async function saveMediaToR2(remoteUrl: string, id: string, fallbackExt: 
       ContentType: contentType || (ext === "mp4" ? "video/mp4" : "image/jpeg"),
     })
   );
+
+  cachedBucketSizeBytes = currentTotal + buffer.length;
 
   return `${INSPIRATION_MEDIA_ROUTE}/${id}.${ext}`;
 }
@@ -100,5 +159,14 @@ export async function saveMediaToR2(remoteUrl: string, id: string, fallbackExt: 
 export function getMediaObject(filename: string) {
   return getClient().send(
     new GetObjectCommand({ Bucket: BUCKET_NAME, Key: `${OBJECT_PREFIX}${filename}` })
+  );
+}
+
+// Metadata-only (no body) - lets routes/inspirationMedia.ts answer a
+// conditional GET (If-None-Match) with a 304 without pulling the file's
+// bytes through the backend, on top of the browser's own max-age cache.
+export function getMediaObjectMeta(filename: string) {
+  return getClient().send(
+    new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: `${OBJECT_PREFIX}${filename}` })
   );
 }

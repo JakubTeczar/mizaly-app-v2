@@ -8,12 +8,12 @@ import {
   useState,
   type ChangeEvent,
 } from "react";
-import { Stage, Layer, Rect, Image as KonvaImage, Text as KonvaText, Transformer } from "react-konva";
+import { Stage, Layer, Rect, Group, Image as KonvaImage, Text as KonvaText, Transformer } from "react-konva";
 import useImage from "use-image";
 import type Konva from "konva";
 import type { CarouselSlide, CarouselTextFontFamily, CarouselTextLayer } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
-import { fileToDataUrl } from "../../lib/imageCrop";
+import { fileToDataUrl, normalizeToJpeg } from "../../lib/imageCrop";
 import { Modal } from "../../components/Modal";
 
 // Slides are always exported at 1080x1080 (Instagram's carousel size). Text
@@ -69,23 +69,40 @@ function useContainerWidth() {
   return { ref, width };
 }
 
-function SlideBackgroundImage({ url, displaySize }: { url: string; displaySize: number }) {
-  const [image] = useImage(url, "anonymous");
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
 
-  const crop = useMemo(() => {
-    if (!image) return null;
-    // Center-crop to a square from whichever dimension is larger, matching
-    // CSS object-fit: cover, since the target is always a 1:1 slide.
-    if (image.width >= image.height) {
-      const size = image.height;
-      return { x: (image.width - size) / 2, y: 0, width: size, height: size };
-    }
-    const size = image.width;
-    return { x: 0, y: (image.height - size) / 2, width: size, height: size };
-  }, [image]);
+// A background image is stored in the same fixed 1080x1080 model space as
+// text layers (see MODEL_SIZE), as a position + scale rather than a native
+// Konva `crop`, so the user can pan/zoom it (drag to reposition, slider to
+// zoom) instead of only getting an automatic centered square crop.
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 3;
 
-  if (!image || !crop) return null;
-  return <KonvaImage image={image} x={0} y={0} width={displaySize} height={displaySize} crop={crop} />;
+interface BackgroundGeometry {
+  coverScale: number;
+  scale: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function computeBackgroundGeometry(image: HTMLImageElement, slide: CarouselSlide): BackgroundGeometry {
+  // The minimum scale at which the image fully covers the square (no gaps),
+  // matching CSS object-fit: cover.
+  const coverScale = Math.max(MODEL_SIZE / image.width, MODEL_SIZE / image.height);
+  const scale = Math.max(slide.backgroundImageScale ?? coverScale, coverScale);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  const defaultX = (MODEL_SIZE - width) / 2;
+  const defaultY = (MODEL_SIZE - height) / 2;
+  // Re-clamped every time (not just on drag) so a stored position from a
+  // smaller zoom level never leaves a gap after the scale changes.
+  const x = clamp(slide.backgroundImageX ?? defaultX, MODEL_SIZE - width, 0);
+  const y = clamp(slide.backgroundImageY ?? defaultY, MODEL_SIZE - height, 0);
+  return { coverScale, scale, x, y, width, height };
 }
 
 export interface SlideCanvasEditorHandle {
@@ -95,10 +112,11 @@ export interface SlideCanvasEditorHandle {
 interface SlideCanvasEditorProps {
   slide: CarouselSlide;
   onChange: (patch: Partial<CarouselSlide>) => void;
+  onBackgroundError: () => void;
 }
 
 const SlideCanvasEditor = forwardRef<SlideCanvasEditorHandle, SlideCanvasEditorProps>(function SlideCanvasEditor(
-  { slide, onChange },
+  { slide, onChange, onBackgroundError },
   ref
 ) {
   const { ref: containerRef, width: displaySize } = useContainerWidth();
@@ -110,6 +128,42 @@ const SlideCanvasEditor = forwardRef<SlideCanvasEditorHandle, SlideCanvasEditorP
   const [editingValue, setEditingValue] = useState("");
 
   const scale = displaySize > 0 ? displaySize / MODEL_SIZE : 0;
+
+  const [bgImage, bgStatus] = useImage(slide.backgroundImageUrl || "", "anonymous");
+
+  useEffect(() => {
+    if (bgStatus === "failed") onBackgroundError();
+  }, [bgStatus, onBackgroundError]);
+
+  const bgGeometry = useMemo(
+    () => (bgImage ? computeBackgroundGeometry(bgImage, slide) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bgImage, slide.backgroundImageX, slide.backgroundImageY, slide.backgroundImageScale]
+  );
+
+  const handleBackgroundDragEnd = (node: Konva.Image) => {
+    if (!bgGeometry) return;
+    onChange({
+      backgroundImageX: node.x() / scale,
+      backgroundImageY: node.y() / scale,
+      backgroundImageScale: bgGeometry.scale,
+    });
+  };
+
+  const handleZoomChange = (zoomFactor: number) => {
+    if (!bgImage || !bgGeometry) return;
+    const newScale = bgGeometry.coverScale * zoomFactor;
+    const newWidth = bgImage.width * newScale;
+    const newHeight = bgImage.height * newScale;
+    // Zoom around the currently visible center, not the top-left corner.
+    const centerX = bgGeometry.x + bgGeometry.width / 2;
+    const centerY = bgGeometry.y + bgGeometry.height / 2;
+    onChange({
+      backgroundImageScale: newScale,
+      backgroundImageX: clamp(centerX - newWidth / 2, MODEL_SIZE - newWidth, 0),
+      backgroundImageY: clamp(centerY - newHeight / 2, MODEL_SIZE - newHeight, 0),
+    });
+  };
 
   // A canvas never repaints on its own once a @font-face finishes loading
   // after first paint, unlike DOM text - force one redraw when fonts settle
@@ -210,8 +264,22 @@ const SlideCanvasEditor = forwardRef<SlideCanvasEditorHandle, SlideCanvasEditorP
           >
             <Layer>
               <Rect x={0} y={0} width={displaySize} height={displaySize} fill={FALLBACK_BACKGROUND} />
-              {slide.backgroundImageUrl && (
-                <SlideBackgroundImage url={slide.backgroundImageUrl} displaySize={displaySize} />
+              {bgImage && bgGeometry && (
+                <Group clip={{ x: 0, y: 0, width: displaySize, height: displaySize }}>
+                  <KonvaImage
+                    image={bgImage}
+                    x={bgGeometry.x * scale}
+                    y={bgGeometry.y * scale}
+                    width={bgGeometry.width * scale}
+                    height={bgGeometry.height * scale}
+                    draggable
+                    dragBoundFunc={(pos) => ({
+                      x: clamp(pos.x, displaySize - bgGeometry.width * scale, 0),
+                      y: clamp(pos.y, displaySize - bgGeometry.height * scale, 0),
+                    })}
+                    onDragEnd={(e) => handleBackgroundDragEnd(e.target as Konva.Image)}
+                  />
+                </Group>
               )}
               {slide.textLayers.map((layer) => (
                 <KonvaText
@@ -263,6 +331,20 @@ const SlideCanvasEditor = forwardRef<SlideCanvasEditorHandle, SlideCanvasEditorP
           />
         )}
       </div>
+
+      {bgImage && bgGeometry && (
+        <div className="carousel-zoom-control">
+          <span className="carousel-zoom-label">Powiększenie zdjęcia</span>
+          <input
+            type="range"
+            min={MIN_ZOOM}
+            max={MAX_ZOOM}
+            step={0.01}
+            value={bgGeometry.scale / bgGeometry.coverScale}
+            onChange={(e) => handleZoomChange(Number(e.target.value))}
+          />
+        </div>
+      )}
 
       <div className="carousel-canvas-toolbar">
         <button type="button" className="btn btn-secondary btn-small" onClick={addLayer}>
@@ -329,11 +411,23 @@ const SlideRowCard = forwardRef<SlideCanvasEditorHandle, SlideRowCardProps>(func
     setError(null);
     setIsUploadingBackground(true);
     try {
-      const dataUrl = await fileToDataUrl(file);
+      const rawDataUrl = await fileToDataUrl(file);
+      const dataUrl = await normalizeToJpeg(rawDataUrl);
       const result = await apiClient.post<{ url: string }>("/api/media/upload", { dataUrl });
-      onChange({ backgroundImageUrl: result.url });
+      // Reset pan/zoom on a new photo so it starts centered rather than
+      // inheriting the previous image's position/scale.
+      onChange({
+        backgroundImageUrl: result.url,
+        backgroundImageX: undefined,
+        backgroundImageY: undefined,
+        backgroundImageScale: undefined,
+      });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Nie udało się wgrać zdjęcia tła.");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Nie udało się wgrać zdjęcia tła. Spróbuj innego zdjęcia (np. wyeksportowanego jako JPG)."
+      );
     } finally {
       setIsUploadingBackground(false);
     }
@@ -357,7 +451,14 @@ const SlideRowCard = forwardRef<SlideCanvasEditorHandle, SlideRowCardProps>(func
       </div>
 
       <div className="carousel-slide-editor__body">
-        <SlideCanvasEditor ref={ref} slide={slide} onChange={onChange} />
+        <SlideCanvasEditor
+          ref={ref}
+          slide={slide}
+          onChange={onChange}
+          onBackgroundError={() =>
+            setError("Nie udało się wyświetlić zdjęcia tła. Spróbuj innego zdjęcia (np. wyeksportowanego jako JPG).")
+          }
+        />
 
         <label
           htmlFor={`slideBg${index}`}
@@ -440,8 +541,9 @@ export function CarouselSlideEditor({ initialSlides, onClose, onSave }: Carousel
   return (
     <Modal title="Edytor karuzeli" onClose={onClose}>
       <p className="hint-text">
-        Dodaj zdjęcie i tekst do każdego slajdu - przeciągnij tekst, żeby go przesunąć, złap za rożek, żeby zmienić
-        rozmiar, kliknij dwa razy, żeby edytować treść.
+        Dodaj zdjęcie i tekst do każdego slajdu - przeciągnij zdjęcie, żeby je wykadrować, i użyj suwaka, żeby je
+        powiększyć. Przeciągnij tekst, żeby go przesunąć, złap za rożek, żeby zmienić rozmiar, kliknij dwa razy, żeby
+        edytować treść.
       </p>
 
       {rows.map((row, index) => (

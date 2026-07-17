@@ -13,7 +13,12 @@
 
 import type { ScrapeProgress } from "@mizaly/shared";
 import { prisma } from "../lib/prisma";
-import { isInstagramScraperConfigured, scrapeInstagramAccounts } from "../integrations/instagramScraper";
+import {
+  fetchPostComments,
+  isInstagramCommentFetchEnabled,
+  isInstagramScraperConfigured,
+  scrapeInstagramAccounts,
+} from "../integrations/instagramScraper";
 import { saveMediaToR2 } from "../lib/r2Store";
 import { classifyUnclassifiedInstagramPosts } from "../lib/contentClassification";
 
@@ -134,6 +139,31 @@ export async function runInspirationScrapeJob(): Promise<void> {
           scrapedAt,
         },
       });
+
+      // Comments are opt-in (INSTAGRAM_FETCH_COMMENTS) and only worth fetching
+      // once - a post's comments keep accumulating over time, but re-fetching
+      // full pagination on every daily re-scrape of an already-known post
+      // would multiply Scrape.do cost for marginal benefit. Same "only do the
+      // expensive part for genuinely new posts" treatment as the R2 re-hosting
+      // above.
+      if (!existing && isInstagramCommentFetchEnabled()) {
+        const comments = await fetchPostComments(post.url);
+        if (comments.length > 0) {
+          await prisma.scrapedInstagramComment.createMany({
+            data: comments.map((c) => ({
+              id: c.id,
+              postId: post.id,
+              author: c.owner,
+              authorId: c.ownerId,
+              authorVerified: c.ownerVerified,
+              text: c.text,
+              likeCount: c.likes,
+              postedAt: c.createdAt ? new Date(c.createdAt * 1000) : null,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
     }
     console.log(`[inspiration-job] Stored ${posts.length} posts.`);
 

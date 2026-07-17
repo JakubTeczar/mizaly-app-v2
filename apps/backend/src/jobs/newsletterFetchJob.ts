@@ -4,7 +4,7 @@
 // nothing is ever deleted or marked read on the server.
 
 import { prisma } from "../lib/prisma";
-import { fetchMailBody, isMailConfigured, listMailEnvelopes } from "../integrations/mail";
+import { fetchMailBodies, isMailConfigured, listMailEnvelopes } from "../integrations/mail";
 import { generateNewsletterInsights } from "../lib/contentInsights";
 
 const CHECK_EVERY_MS = 60 * 60 * 1000;
@@ -27,9 +27,16 @@ export async function runNewsletterFetchJob(): Promise<void> {
     );
 
     const newEnvelopes = envelopes.filter((e) => !existingIds.has(e.messageId));
+    const bodies = await fetchMailBodies(newEnvelopes.map((e) => e.uid));
+
+    let stored = 0;
     for (const envelope of newEnvelopes) {
+      const body = bodies.get(envelope.uid);
+      if (!body) {
+        console.error(`[newsletter-job] No body fetched for message ${envelope.messageId} (uid ${envelope.uid}).`);
+        continue;
+      }
       try {
-        const body = await fetchMailBody(envelope.uid);
         await prisma.newsletterEmail.create({
           data: {
             messageId: envelope.messageId,
@@ -41,13 +48,14 @@ export async function runNewsletterFetchJob(): Promise<void> {
             bodyText: body.bodyText,
           },
         });
+        stored++;
       } catch (err) {
-        console.error(`[newsletter-job] Failed to fetch message ${envelope.messageId}:`, err);
+        console.error(`[newsletter-job] Failed to store message ${envelope.messageId}:`, err);
       }
     }
-    console.log(`[newsletter-job] Stored ${newEnvelopes.length} new newsletter(s).`);
+    console.log(`[newsletter-job] Stored ${stored} new newsletter(s).`);
 
-    if (newEnvelopes.length > 0) {
+    if (stored > 0) {
       try {
         await generateNewsletterInsights();
       } catch (err) {

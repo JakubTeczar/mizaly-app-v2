@@ -34,6 +34,9 @@ const carouselTextLayerSchema = z.object({
 const carouselSlideSchema = z.object({
   order: z.number(),
   backgroundImageUrl: z.string().optional(),
+  backgroundImageX: z.number().optional(),
+  backgroundImageY: z.number().optional(),
+  backgroundImageScale: z.number().optional(),
   textLayers: z.array(carouselTextLayerSchema).default([]),
 });
 

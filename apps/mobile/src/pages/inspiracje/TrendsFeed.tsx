@@ -4,7 +4,7 @@ import { apiClient, ApiError } from "../../lib/apiClient";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import { TopMetricsStrip } from "./TopMetricsStrip";
 import { SortControl } from "./SortControl";
-import { ClassificationRanking } from "./ClassificationRanking";
+import { ClassificationRanking, type ClassifiableItem } from "./ClassificationRanking";
 
 interface InstagramPost {
   id: string;
@@ -31,7 +31,35 @@ interface InstagramPost {
   // Set by lib/contentClassification.ts on the backend - null until classified.
   topic?: string | null;
   format?: string | null;
-  hook?: string | null;
+  hookText?: string | null;
+  hookVisual?: string | null;
+  cta?: string | null;
+  ctaDetail?: string | null;
+  visualDescription?: string | null;
+  visualText?: string | null;
+  transcriptExcerpt?: string | null;
+}
+
+const CLASSIFICATION_AXES = ["topic", "format", "hookText", "hookVisual", "cta"] as const;
+
+function toClassifiableItem(post: InstagramPost): ClassifiableItem {
+  return {
+    id: post.id,
+    topic: post.topic,
+    format: post.format,
+    hookText: post.hookText,
+    hookVisual: post.hookVisual,
+    cta: post.cta,
+    ctaDetail: post.ctaDetail,
+    visualDescription: post.visualDescription,
+    visualText: post.visualText,
+    transcriptExcerpt: post.transcriptExcerpt,
+    outlierRatio: post.outlierRatio,
+    isMature: post.isMature,
+    thumbnailUrl: post.imageUrl,
+    title: post.caption || `Post @${post.username}`,
+    externalUrl: post.url,
+  };
 }
 
 interface TrendsResponse {
@@ -178,7 +206,7 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
 
   return (
     <>
-      <ClassificationRanking items={posts} />
+      <ClassificationRanking items={posts.map(toClassifiableItem)} axes={[...CLASSIFICATION_AXES]} />
       <TopMetricsStrip heading="Top 3 - odchylenie od normy konta" items={topPosts} />
 
       <section className="card">

@@ -89,6 +89,9 @@ export interface CarouselTextLayer {
 export interface CarouselSlide {
   order: number;
   backgroundImageUrl?: string;
+  backgroundImageX?: number;
+  backgroundImageY?: number;
+  backgroundImageScale?: number;
   textLayers: CarouselTextLayer[];
 }
 
@@ -193,9 +196,41 @@ export const CONTENT_HOOKS = [
   "inne",
 ] as const;
 
+// Visual hook - what's SHOWN (not said/written) in the first frame/image,
+// classified separately from CONTENT_HOOKS (which fits verbal/textual hooks,
+// not raw imagery) - see lib/contentClassification.ts's
+// classifyVisualHookFromSource.
+export const CONTENT_HOOKS_VISUAL = [
+  "zbliżenie na twarz/emocję",
+  "nietypowy/zaskakujący kadr",
+  "produkt lub jedzenie w centrum kadru",
+  "wizualne przed/po",
+  "dynamiczny ruch/akcja",
+  "tekst/grafika na ekranie jako główny element",
+  "perspektywa POV",
+  "grupa ludzi/dowód społeczny",
+  "inne",
+] as const;
+
+// Call-to-action category - see lib/contentClassification.ts's classifyCta,
+// always paired with a free-text ctaDetail (the literal CTA wording/
+// description) on ScrapedInstagramPost.
+export const CONTENT_CTAS = [
+  "zachęta do komentarza",
+  "zachęta do polubienia/udostępnienia",
+  "link w bio / wiadomość prywatna",
+  "oznacz znajomego",
+  "zapisz post na później",
+  "zaproszenie do udziału (wyzwanie/challenge)",
+  "brak wyraźnego CTA",
+  "inne",
+] as const;
+
 export type ContentTopic = (typeof CONTENT_TOPICS)[number];
 export type ContentFormat = (typeof CONTENT_FORMATS)[number];
 export type ContentHook = (typeof CONTENT_HOOKS)[number];
+export type ContentHookVisual = (typeof CONTENT_HOOKS_VISUAL)[number];
+export type ContentCta = (typeof CONTENT_CTAS)[number];
 
 export interface YoutubeVideoSummary {
   id: string;

@@ -8,7 +8,7 @@ import type {
 } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
 import { WatchlistManager } from "./WatchlistManager";
-import { ClassificationRanking } from "./ClassificationRanking";
+import { ClassificationRanking, type ClassifiableItem } from "./ClassificationRanking";
 import { TopMetricsStrip } from "./TopMetricsStrip";
 import { SortControl } from "./SortControl";
 
@@ -254,7 +254,22 @@ export function YoutubeSection() {
         onRemove={handleRemoveChannel}
       />
 
-      <ClassificationRanking items={videos} />
+      <ClassificationRanking
+        items={videos.map(
+          (video): ClassifiableItem => ({
+            id: video.id,
+            topic: video.topic,
+            format: video.format,
+            hook: video.hook,
+            outlierRatio: video.outlierRatio,
+            isMature: video.isMature,
+            thumbnailUrl: video.thumbnailUrl,
+            title: video.title,
+            onOpen: () => setSelectedVideoId(video.id),
+          })
+        )}
+        axes={["topic", "format", "hook"]}
+      />
       <TopMetricsStrip heading="Top 3 - odchylenie od normy kanału" items={topVideos} />
 
       <section className="card">

@@ -70,21 +70,30 @@ export async function listMailEnvelopes(): Promise<MailEnvelope[]> {
   }
 }
 
-export async function fetchMailBody(uid: number): Promise<MailBody> {
+// Fetches multiple messages' bodies over a single IMAP connection/mailbox
+// lock instead of one per message - the first run against a mailbox with
+// many messages was opening (and TLS-handshaking) a fresh connection per
+// message, which took ~2 minutes for 64 messages. Later runs only pay for
+// genuinely new messages (see runNewsletterFetchJob's existingIds filter),
+// so this mainly matters for a cold mailbox or a burst of new mail.
+export async function fetchMailBodies(uids: number[]): Promise<Map<number, MailBody>> {
+  const results = new Map<number, MailBody>();
+  if (uids.length === 0) return results;
+
   const client = createClient();
   await client.connect();
   try {
     const lock = await client.getMailboxLock("INBOX");
     try {
-      const message = await client.fetchOne(String(uid), { source: true }, { uid: true });
-      if (!message || !message.source) {
-        return { bodyHtml: null, bodyText: null };
+      for await (const message of client.fetch(uids, { source: true, uid: true }, { uid: true })) {
+        if (!message.source) continue;
+        const parsed = await simpleParser(message.source);
+        results.set(message.uid, {
+          bodyHtml: typeof parsed.html === "string" ? parsed.html : null,
+          bodyText: parsed.text ?? null,
+        });
       }
-      const parsed = await simpleParser(message.source);
-      return {
-        bodyHtml: typeof parsed.html === "string" ? parsed.html : null,
-        bodyText: parsed.text ?? null,
-      };
+      return results;
     } finally {
       lock.release();
     }

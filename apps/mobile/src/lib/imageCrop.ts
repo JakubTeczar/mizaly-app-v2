@@ -64,3 +64,20 @@ export async function cropToSafeAspectRatio(dataUrl: string): Promise<string> {
   ctx.drawImage(img, sourceX, sourceY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
   return canvas.toDataURL("image/jpeg", 0.9);
 }
+
+// Decodes an image and re-encodes it as JPEG via canvas, without cropping.
+// Used for photos that get center-cropped to a square later on (carousel
+// slide backgrounds), but that still need to fail fast here on undecodable
+// source formats (e.g. HEIC straight from an iPhone) instead of uploading
+// successfully and only breaking later, silently, when the canvas renderer
+// tries to display them.
+export async function normalizeToJpeg(dataUrl: string): Promise<string> {
+  const img = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return dataUrl;
+  ctx.drawImage(img, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.92);
+}

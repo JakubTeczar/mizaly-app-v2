@@ -236,9 +236,60 @@ model ScrapedInstagramPost {
   topic          String?
   format         String?
   hook           String?
+  // Populated by lib/mediaAnalysis.ts the first time a video post's hook is
+  // analyzed - never re-computed once set (skip-if-known, same as R2 media
+  // re-hosting above). null for image posts and for videos not yet processed.
+  // Shape: { text: string; segments: { start: number; end: number; text: string }[] }
+  // (start/end in seconds - straight from Whisper's verbose_json segments).
+  transcript        Json?
+  // Populated by lib/mediaAnalysis.ts for image posts (GPT-4o-mini vision):
+  // short Polish description of what's shown in the cover/first-slide image.
+  visualDescription String?  @db.Text
+  // Literal text the model reads off the image itself (on-image captions/
+  // labels) - kept separate from visualDescription since hook classification
+  // treats "what's shown" and "what's literally written" as distinct signals.
+  visualText        String?  @db.Text
+  // Verbal/textual hook (spoken opening line for video, on-image text for
+  // images) - see lib/contentClassification.ts's classifyHookFromSource.
+  // Supersedes the legacy `hook` column for Instagram going forward; `hook`
+  // itself is left in place, unused, rather than dropped (non-destructive).
+  hookText   String?
+  // Visual hook - what's shown (not said/written) in the first frame/image,
+  // classified separately since these are different signals. One of
+  // CONTENT_HOOKS_VISUAL.
+  hookVisual String?
+  // Call-to-action category, judged from ALL available signals (caption,
+  // transcript, visual description/text) - not scoped to just the opening or
+  // closing moment. One of CONTENT_CTAS.
+  cta        String?
+  // Free-text: what the CTA actually said/showed, always populated - critical
+  // when cta = "inne" so that information isn't lost behind a generic bucket.
+  ctaDetail  String?  @db.Text
+
+  comments ScrapedInstagramComment[]
 
   @@unique([username, postedAt])
   @@index([username])
+}
+
+// Only populated when INSTAGRAM_FETCH_COMMENTS is set (see
+// integrations/instagramScraper.ts) - comment pagination is several extra
+// Scrape.do requests per post, so it's opt-in rather than on by default.
+// Fetched once per post, the first time it's scraped (same skip-if-known
+// treatment as the image/video re-hosting in jobs/inspirationScrapeJob.ts) -
+// not refreshed on later re-scrapes.
+model ScrapedInstagramComment {
+  id             String   @id
+  postId         String
+  post           ScrapedInstagramPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author         String
+  authorId       String?
+  authorVerified Boolean  @default(false)
+  text           String   @db.Text
+  likeCount      Int      @default(0)
+  postedAt       DateTime?
+
+  @@index([postId])
 }
 
 // AI-generated engagement/insight analysis of scraped content, produced at

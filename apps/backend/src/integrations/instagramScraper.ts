@@ -5,26 +5,52 @@
 // jobs/inspirationScrapeJob.ts didn't need to change its upsert/analysis
 // logic - only which function it calls for raw data.
 //
-// Comments are NOT fetched here (posts only) - Scrape.do's full comment
-// pagination costs several extra requests per post, and the Instagram side
-// of Inspiracje doesn't need them yet (unlike YouTube, which does fetch and
-// keep all comments - see jobs/youtubeScrapeJob.ts). The underlying script
-// already supports fetching comments too (run_scrapedo.py --include-comments)
-// for whenever that's wanted - not passed here on purpose.
+// Comments are opt-in via INSTAGRAM_FETCH_COMMENTS - Scrape.do's full comment
+// pagination costs several extra requests per post, so jobs/
+// inspirationScrapeJob.ts only calls fetchPostComments() below for a post the
+// first time it's scraped (never on later re-scrapes of an already-known
+// post), same treatment as the image/video re-hosting there.
 
 import { execFile } from "child_process";
 import path from "path";
 
 const SCRAPER_DIR = path.join(__dirname, "..", "..", "..", "instagram-scraper");
 const SCRAPER_ENTRYPOINT = path.join(SCRAPER_DIR, "run_scrapedo.py");
+const COMMENTS_ENTRYPOINT = path.join(SCRAPER_DIR, "fetch_post_comments.py");
 const PYTHON_BIN = process.env.PYTHON_BIN || "python3";
 
-// Bumped from 5 - the classification ranking and outlier-ratio median both
-// need enough accumulated history per account to be statistically meaningful
-// (see MIN_RELIABLE_SAMPLE_SIZE in lib/engagementNormalization.ts and
-// MIN_GROUP_SIZE in ClassificationRanking.tsx), and 5-per-day was too thin to
-// reach that in a reasonable number of days.
-export const POSTS_PER_ACCOUNT = 20;
+export function isInstagramCommentFetchEnabled(): boolean {
+  return process.env.INSTAGRAM_FETCH_COMMENTS === "true";
+}
+
+export interface ScrapedComment {
+  id: string;
+  text: string;
+  createdAt: number | null;
+  owner: string;
+  ownerId: string | null;
+  ownerVerified: boolean;
+  likes: number;
+}
+
+interface RawScrapedComment {
+  id?: string | number;
+  text?: string | null;
+  created_at?: number | null;
+  owner?: string | null;
+  owner_id?: string | number | null;
+  owner_verified?: boolean | null;
+  likes?: number | null;
+}
+
+// Bumped from 5, then from 20 - the classification ranking and outlier-ratio
+// median both need enough accumulated history per account to be statistically
+// meaningful (see MIN_RELIABLE_SAMPLE_SIZE in lib/engagementNormalization.ts
+// and MIN_GROUP_SIZE in ClassificationRanking.tsx). 20 left too little margin
+// above MIN_RELIABLE_SAMPLE_SIZE (10) once the most recent ~1-3 posts are
+// excluded as "immature" (<3 days old, see MIN_MATURITY_DAYS) - 25 keeps at
+// least ~15 mature posts per account in the common case.
+export const POSTS_PER_ACCOUNT = 25;
 
 // Default seed for WatchedInstagramAccount (see lib/watchlistSeed.ts) - fitness
 // niche, brand accounts (not individuals) for reliable public scraping. The
@@ -149,4 +175,64 @@ export async function scrapeInstagramAccounts(
   }
 
   return results;
+}
+
+function runCommentsScript(postUrl: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      PYTHON_BIN,
+      [COMMENTS_ENTRYPOINT, "--url", postUrl],
+      {
+        cwd: SCRAPER_DIR,
+        env: process.env,
+        timeout: 5 * 60 * 1000,
+        maxBuffer: 20 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve(stdout);
+      }
+    );
+  });
+}
+
+// Fetches all comments for one post. Only called by jobs/
+// inspirationScrapeJob.ts for a post the first time it's scraped (see
+// isInstagramCommentFetchEnabled above) - never for an already-known post.
+export async function fetchPostComments(postUrl: string): Promise<ScrapedComment[]> {
+  let stdout: string;
+  try {
+    stdout = await runCommentsScript(postUrl);
+  } catch (err) {
+    console.error(`[instagram-scraper] Failed to fetch comments for ${postUrl}:`, err);
+    return [];
+  }
+
+  let parsed: { comments?: RawScrapedComment[]; error?: string };
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    console.error(`[instagram-scraper] Non-JSON comments output for ${postUrl}:`, stdout.slice(0, 300));
+    return [];
+  }
+
+  if (parsed.error) {
+    console.error(`[instagram-scraper] Scraper reported a comments error for ${postUrl}:`, parsed.error);
+    return [];
+  }
+
+  return (parsed.comments ?? [])
+    .filter((c): c is RawScrapedComment & { id: string | number } => c.id != null)
+    .map((c) => ({
+      id: String(c.id),
+      text: c.text ?? "",
+      createdAt: c.created_at ?? null,
+      owner: c.owner ?? "",
+      ownerId: c.owner_id != null ? String(c.owner_id) : null,
+      ownerVerified: Boolean(c.owner_verified),
+      likes: c.likes ?? 0,
+    }));
 }
