@@ -1900,6 +1900,13 @@ video.group-item-carousel-media {
   display: block;
 }
 
+/* Reels are 9:16 portrait video - the shared box above crops them hard.
+   Videos get their own taller, portrait-ratio box; photos are unchanged. */
+.insta-post-image video {
+  max-height: none;
+  aspect-ratio: 9 / 16;
+}
+
 .insta-post-reel-badge {
   position: absolute;
   top: 10px;
