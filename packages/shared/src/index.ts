@@ -227,6 +227,7 @@ export const CONTENT_HOOKS = [
   "liczba/statystyka",
   "problem na starcie",
   "osobista historia",
+  "porada/rada",
   "cliffhanger",
   "inne",
 ] as const;
@@ -253,6 +254,7 @@ export const CONTENT_HOOKS_VISUAL = [
 export const CONTENT_CTAS = [
   "zachęta do komentarza",
   "zachęta do polubienia/udostępnienia",
+  "zachęta do obserwowania profilu",
   "link w bio / wiadomość prywatna",
   "oznacz znajomego",
   "zapisz post na później",
@@ -426,8 +428,6 @@ export interface YoutubeVideoDetail extends YoutubeVideoSummary {
   transcript: string | null;
   comments: YoutubeVideoComment[];
 }
-
-export type YoutubeAnalysisAction = "summarize" | "objections" | "topics";
 
 export interface ScrapeProgress {
   isRunning: boolean;

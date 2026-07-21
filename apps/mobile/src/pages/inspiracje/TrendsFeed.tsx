@@ -32,8 +32,8 @@ interface InstagramPost {
   // Set by lib/contentClassification.ts on the backend - null until classified.
   topic?: string | null;
   format?: string | null;
-  hookText?: string | null;
-  hookVisual?: string | null;
+  hook?: string | null;
+  hookDetail?: string | null;
   cta?: string | null;
   ctaDetail?: string | null;
   visualDescription?: string | null;
@@ -41,15 +41,15 @@ interface InstagramPost {
   transcriptExcerpt?: string | null;
 }
 
-const CLASSIFICATION_AXES = ["topic", "format", "hookText", "hookVisual", "cta"] as const;
+const CLASSIFICATION_AXES = ["topic", "format", "hook", "cta"] as const;
 
 function toClassifiableItem(post: InstagramPost): ClassifiableItem {
   return {
     id: post.id,
     topic: post.topic,
     format: post.format,
-    hookText: post.hookText,
-    hookVisual: post.hookVisual,
+    hook: post.hook,
+    hookDetail: post.hookDetail,
     cta: post.cta,
     ctaDetail: post.ctaDetail,
     visualDescription: post.visualDescription,
@@ -173,6 +173,18 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
     };
   }, [sortBy]);
 
+  // Memoized on `posts` specifically (not recreated on every render) - this
+  // page polls /scrape-status every 2s (see the effect below), which
+  // re-renders TrendsFeed constantly even when posts hasn't changed. Without
+  // this, `posts.map(toClassifiableItem)` inline in JSX would produce a
+  // brand-new array every ~2s; ClassificationRanking's `useMemo(() =>
+  // rankBy(items, axis), [items, axis])` would then see a "changed" items
+  // reference and recompute, handing GroupItemCarousel a new `items` prop -
+  // whose own `useEffect(() => setIndex(0), [items])` would reset the
+  // carousel back to slide 1 every couple of seconds, making manual
+  // next/prev navigation look broken.
+  const classifiableItems = useMemo(() => posts.map(toClassifiableItem), [posts]);
+
   // Ranked by outlierRatio (how far a post deviates from its OWN account's
   // usual pace), not raw likes - a plain "most likes" top 3 is dominated by
   // whichever account is biggest/oldest, not by what's actually unusual.
@@ -249,7 +261,7 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
   return (
     <>
       <CommentClusters platform="instagram" />
-      <ClassificationRanking items={posts.map(toClassifiableItem)} axes={[...CLASSIFICATION_AXES]} />
+      <ClassificationRanking items={classifiableItems} axes={[...CLASSIFICATION_AXES]} />
       <TopMetricsStrip heading="Top 3 - odchylenie od normy konta" items={topPosts} />
 
       <section className="card">
@@ -324,7 +336,7 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
                 )}
                 <div className="insta-post-actions">
                   <a href={post.url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-small">
-                    Zobacz na Instagramie
+                    Zobacz oryginał
                   </a>
                   <button
                     type="button"

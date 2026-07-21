@@ -3,17 +3,18 @@ import { ChevronIcon } from "../../components/ChevronIcon";
 
 // Normalized shape so this component doesn't need to know whether it's
 // rendering Instagram posts or YouTube videos - each caller (TrendsFeed.tsx,
-// YoutubeSection.tsx) maps its own item shape into this one. hookText/
-// hookVisual/cta/ctaDetail/visualDescription/visualText/transcriptExcerpt are
-// Instagram-only (see lib/contentClassification.ts on the backend) - YouTube
-// keeps using the single legacy `hook` field.
+// YoutubeSection.tsx) maps its own item shape into this one. Both platforms
+// now share the single unified `hook` axis (one judgment per post/video, not
+// split into text/visual) - `hookDetail`/cta/ctaDetail/visualDescription/
+// visualText/transcriptExcerpt are Instagram-only (see
+// lib/contentClassification.ts on the backend), YouTube just doesn't have a
+// literal-quote detail for its hook yet.
 export interface ClassifiableItem {
   id: string;
   topic?: string | null;
   format?: string | null;
   hook?: string | null;
-  hookText?: string | null;
-  hookVisual?: string | null;
+  hookDetail?: string | null;
   cta?: string | null;
   ctaDetail?: string | null;
   visualDescription?: string | null;
@@ -85,14 +86,12 @@ interface RankedGroup {
   items: ClassifiableItem[];
 }
 
-export type Axis = "topic" | "format" | "hook" | "hookText" | "hookVisual" | "cta";
+export type Axis = "topic" | "format" | "hook" | "cta";
 
 const AXIS_LABELS: Record<Axis, string> = {
   topic: "Temat",
   format: "Format",
   hook: "Hook",
-  hookText: "Hook (tekst)",
-  hookVisual: "Hook (wizualny)",
   cta: "CTA",
 };
 
@@ -129,29 +128,24 @@ function rankBy(items: ClassifiableItem[], axis: Axis): RankedGroup[] {
 const AXIS_DETAIL_LABEL: Record<Axis, string> = {
   topic: "Fragment posta",
   format: "Fragment posta",
-  hook: "Hook",
-  hookText: "Otwierające zdanie (hook)",
-  hookVisual: "Co widać w kadrze",
+  hook: "Otwierające zdanie (hook)",
   cta: "Ostatnie zdanie posta (CTA)",
 };
 
 // What to show for one item when its group is expanded - depends on the axis,
 // since "what exactly is this hook/format/topic" means different underlying
-// data per axis (see contentClassification.ts): format wants the actual
-// post/reel itself; hookText the literal opening wording; hookVisual what's
-// shown in the frame/image; topic the fuller transcript/caption context; cta
-// the literal CTA quote.
+// data per axis (see contentClassification.ts): hook wants the literal
+// hookDetail quote (falls back to YouTube's plain transcript excerpt, since
+// YouTube's `hook` axis doesn't have a detail field yet); cta the literal CTA
+// quote; topic/format the fuller transcript/caption context.
 function detailTextForAxis(item: ClassifiableItem, axis: Axis): string {
   switch (axis) {
-    case "hookText":
-      return item.visualText || item.transcriptExcerpt || item.title;
-    case "hookVisual":
-      return item.visualDescription || item.title;
+    case "hook":
+      return item.hookDetail || item.transcriptExcerpt || item.title;
     case "cta":
       return item.ctaDetail || item.title;
     case "topic":
     case "format":
-    case "hook":
     default:
       return item.transcriptExcerpt || item.title;
   }

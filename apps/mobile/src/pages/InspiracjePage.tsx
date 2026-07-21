@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { InspirationItem } from "@mizaly/shared";
 import { apiClient, ApiError } from "../lib/apiClient";
 import { FavoritesView } from "./inspiracje/FavoritesView";
@@ -37,12 +37,6 @@ export function InspiracjePage() {
     });
   }, [activeSource]);
 
-  const [content, setContent] = useState("");
-  const [tags, setTags] = useState("");
-  const [note, setNote] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-
   const loadItems = () => {
     setIsLoading(true);
     apiClient
@@ -55,31 +49,6 @@ export function InspiracjePage() {
   useEffect(() => {
     loadItems();
   }, []);
-
-  const handleAdd = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!content.trim()) return;
-    setFormError(null);
-    setIsSubmitting(true);
-    try {
-      const created = await apiClient.post<InspirationItem>("/api/inspiration-items", {
-        content: content.trim(),
-        tags: tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean),
-        note: note.trim() || undefined,
-      });
-      setItems((prev) => [created, ...prev]);
-      setContent("");
-      setTags("");
-      setNote("");
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Nie udało się zapisać inspiracji.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleDelete = async (id: string) => {
     const previous = items;
@@ -119,41 +88,6 @@ export function InspiracjePage() {
           {activeSource === "youtube" && <YoutubeSection />}
 
           {activeSource === "mail" && <NewsletterSection />}
-
-          <section className="card">
-            <h2>Dodaj inspirację ręcznie</h2>
-
-            <form onSubmit={handleAdd}>
-              <div className="field">
-                <label htmlFor="content">Treść</label>
-                <textarea
-                  id="content"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="Co Cię zainspirowało?"
-                  required
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="tags">Tagi (oddzielone przecinkami)</label>
-                <input
-                  id="tags"
-                  type="text"
-                  value={tags}
-                  onChange={(e) => setTags(e.target.value)}
-                  placeholder="np. reels, wiosna, promocja"
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="note">Notatka (opcjonalnie)</label>
-                <input id="note" type="text" value={note} onChange={(e) => setNote(e.target.value)} />
-              </div>
-              {formError && <p className="error-text">{formError}</p>}
-              <button type="submit" className="btn" disabled={isSubmitting}>
-                {isSubmitting ? "Zapisywanie…" : "Zapisz inspirację"}
-              </button>
-            </form>
-          </section>
         </>
       )}
 

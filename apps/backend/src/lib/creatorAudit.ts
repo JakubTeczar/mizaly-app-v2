@@ -85,7 +85,7 @@ async function rehostAndAnalyzeImages(instagramPostId: string, imageUrls: string
 }
 
 // Runs the full classification pipeline (transcript/visual analysis,
-// hookText/hookVisual/cta/topic/format) for one already-created row, then
+// hookVideo/hookPost/cta/topic/format) for one already-created row, then
 // writes everything in one final update.
 export async function analyzeCreatorAuditPost(post: {
   id: string;

@@ -1,11 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  ScrapeProgress,
-  WatchedYoutubeChannel,
-  YoutubeAnalysisAction,
-  YoutubeVideoDetail,
-  YoutubeVideoSummary,
-} from "@mizaly/shared";
+import type { ScrapeProgress, WatchedYoutubeChannel, YoutubeVideoDetail, YoutubeVideoSummary } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
 import { WatchlistManager } from "./WatchlistManager";
 import { ClassificationRanking, type ClassifiableItem } from "./ClassificationRanking";
@@ -43,18 +37,9 @@ const SORT_OPTIONS = [
 // thumbnail at once.
 const PAGE_SIZE = 10;
 
-const ANALYSIS_ACTIONS: { id: YoutubeAnalysisAction; label: string }[] = [
-  { id: "summarize", label: "Streść mi transkrypcję" },
-  { id: "objections", label: "Sprawdź obiekcje w komentarzach" },
-  { id: "topics", label: "Znajdź powtarzające się tematy" },
-];
-
 function VideoDetail({ videoId, onBack }: { videoId: string; onBack: () => void }) {
   const [video, setVideo] = useState<YoutubeVideoDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [runningAction, setRunningAction] = useState<YoutubeAnalysisAction | null>(null);
-  const [results, setResults] = useState<Partial<Record<YoutubeAnalysisAction, string>>>({});
-  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     apiClient
@@ -62,19 +47,6 @@ function VideoDetail({ videoId, onBack }: { videoId: string; onBack: () => void 
       .then(setVideo)
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Nie udało się pobrać filmu."));
   }, [videoId]);
-
-  const runAction = async (action: YoutubeAnalysisAction) => {
-    setActionError(null);
-    setRunningAction(action);
-    try {
-      const res = await apiClient.post<{ result: string }>(`/api/youtube-videos/${videoId}/analyze`, { action });
-      setResults((prev) => ({ ...prev, [action]: res.result }));
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Nie udało się wykonać analizy.");
-    } finally {
-      setRunningAction(null);
-    }
-  };
 
   return (
     <div>
@@ -89,40 +61,31 @@ function VideoDetail({ videoId, onBack }: { videoId: string; onBack: () => void 
       {!video && !loadError && <p className="hint-text">Ładowanie…</p>}
 
       {video && (
-        <>
-          <section className="card">
-            {video.thumbnailUrl && (
-              <img
-                src={video.thumbnailUrl}
-                alt={video.title}
-                style={{ width: "100%", borderRadius: 12, marginBottom: 12 }}
-              />
-            )}
-            <div className="insta-post-stats">
-              <span>{formatCount(video.viewCount)} wyświetleń</span>
-              <span>{formatCount(video.likeCount)} polubień</span>
-              <span>{formatCount(video.commentCount)} komentarzy</span>
-            </div>
-          </section>
-
-          <section className="card">
-            <h2>Analiza AI</h2>
-            {actionError && <p className="error-text">{actionError}</p>}
-            {ANALYSIS_ACTIONS.map((action) => (
-              <div key={action.id} style={{ marginBottom: 14 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-small"
-                  disabled={runningAction === action.id}
-                  onClick={() => runAction(action.id)}
-                >
-                  {runningAction === action.id ? "Analizuję…" : action.label}
-                </button>
-                {results[action.id] && <p className="analysis-text" style={{ marginTop: 10 }}>{results[action.id]}</p>}
-              </div>
-            ))}
-          </section>
-        </>
+        <section className="card">
+          {video.thumbnailUrl && (
+            <img
+              src={video.thumbnailUrl}
+              alt={video.title}
+              style={{ width: "100%", borderRadius: 12, marginBottom: 12 }}
+            />
+          )}
+          <div className="insta-post-stats">
+            <span>{formatCount(video.viewCount)} wyświetleń</span>
+            <span>{formatCount(video.likeCount)} polubień</span>
+            <span>{formatCount(video.commentCount)} komentarzy</span>
+          </div>
+          {/* videoId is YouTube's own video id (see ScrapedYoutubeVideo in
+              schema.prisma), so the watch URL is constructable directly. */}
+          <a
+            href={`https://www.youtube.com/watch?v=${videoId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="btn btn-secondary btn-small"
+            style={{ marginTop: 12 }}
+          >
+            Zobacz oryginał
+          </a>
+        </section>
       )}
     </div>
   );
@@ -219,6 +182,33 @@ export function YoutubeSection() {
     [videos]
   );
 
+  // Memoized on `videos` specifically (not recreated on every render) - this
+  // page polls /scrape-status every 2s (see the effect above), which
+  // re-renders YoutubeSection constantly even when videos hasn't changed.
+  // Without this, mapping videos inline in JSX would produce a brand-new
+  // array every ~2s; ClassificationRanking's own useMemo would then see a
+  // "changed" items reference and recompute, handing GroupItemCarousel a new
+  // `items` prop - whose effect resets the carousel back to slide 1 every
+  // couple of seconds, making manual next/prev navigation look broken.
+  const classifiableItems = useMemo(
+    (): ClassifiableItem[] =>
+      videos.map((video) => ({
+        id: video.id,
+        topic: video.topic,
+        format: video.format,
+        hook: video.hook,
+        outlierRatio: video.outlierRatio,
+        isMature: video.isMature,
+        thumbnailUrl: video.thumbnailUrl,
+        likesCount: video.likeCount,
+        commentsCount: video.commentCount,
+        viewsCount: video.viewCount,
+        title: video.title,
+        onOpen: () => setSelectedVideoId(video.id),
+      })),
+    [videos]
+  );
+
   const visibleVideos = useMemo(() => videos.slice(0, visibleCount), [videos, visibleCount]);
 
   // Grows visibleCount once the sentinel comes within one screen of the
@@ -286,25 +276,7 @@ export function YoutubeSection() {
       <YoutubeAccountStatsPanel />
 
       <CommentClusters platform="youtube" />
-      <ClassificationRanking
-        items={videos.map(
-          (video): ClassifiableItem => ({
-            id: video.id,
-            topic: video.topic,
-            format: video.format,
-            hook: video.hook,
-            outlierRatio: video.outlierRatio,
-            isMature: video.isMature,
-            thumbnailUrl: video.thumbnailUrl,
-            likesCount: video.likeCount,
-            commentsCount: video.commentCount,
-            viewsCount: video.viewCount,
-            title: video.title,
-            onOpen: () => setSelectedVideoId(video.id),
-          })
-        )}
-        axes={["topic", "format", "hook"]}
-      />
+      <ClassificationRanking items={classifiableItems} axes={["topic", "format", "hook"]} />
       <TopMetricsStrip heading="Top 3 - odchylenie od normy kanału" items={topVideos} />
 
       <section className="card">

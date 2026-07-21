@@ -286,7 +286,18 @@ model ScrapedInstagramPost {
   // posts scraped before this column existed).
   topic          String?
   format         String?
+  // Unified hook (judged from BOTH what's said/written together, not split
+  // into hookText/hookVisual below - that split proved confusing: a "visual"
+  // category like "zbliżenie na twarz" isn't really a type of hook, it's
+  // camera framing, and got picked even when there was real spoken/written
+  // content that should have driven the category instead). One of
+  // CONTENT_HOOKS. This column briefly went unused between the old
+  // single-axis system and the hookText/hookVisual split - now repurposed as
+  // the actively-written field again, see classifyHook.
   hook           String?
+  // Literal, full quote of the hook (not truncated to one sentence) - see
+  // classifyHook. Empty when hook = "inne".
+  hookDetail     String?  @db.Text
   // Populated by lib/mediaAnalysis.ts the first time a video post's hook is
   // analyzed - never re-computed once set (skip-if-known, same as R2 media
   // re-hosting above). null for image posts and for videos not yet processed.
@@ -295,10 +306,10 @@ model ScrapedInstagramPost {
   transcript        Json?
   // Populated by lib/mediaAnalysis.ts for image posts (GPT-4o-mini vision):
   // short Polish description of what's shown in the cover/FIRST slide only -
-  // hook is deliberately judged from the opening slide alone (see hookText/
-  // hookVisual below), same "hook = first moment" semantics as
-  // lib/creatorAudit.ts. Every slide (not just this one) still gets analyzed -
-  // see slideAnalysis below, which feeds topic/format/cta instead.
+  // hook is deliberately judged from the opening slide alone (see `hook`
+  // below), same "hook = first moment" semantics as lib/creatorAudit.ts.
+  // Every slide (not just this one) still gets analyzed - see slideAnalysis
+  // below, which feeds topic/format/cta instead.
   visualDescription String?  @db.Text
   // Literal text the model reads off the FIRST slide only - kept separate
   // from visualDescription since hook classification treats "what's shown"
@@ -312,14 +323,11 @@ model ScrapedInstagramPost {
   // visualText above - a video has no further "slides").
   // Shape: Array<{ source: string; description: string; extractedText: string }>
   slideAnalysis     Json?
-  // Verbal/textual hook (spoken opening line for video, on-image text for
-  // images) - see lib/contentClassification.ts's classifyHookFromSource.
-  // Supersedes the legacy `hook` column for Instagram going forward; `hook`
-  // itself is left in place, unused, rather than dropped (non-destructive).
+  // DEPRECATED - superseded by the unified `hook`/`hookDetail` above (split
+  // text/visual hook axes turned out not to work well, see `hook`'s
+  // comment). Left in place, unused, rather than dropped (non-destructive) -
+  // matches how the original `hook` column was kept during ITS deprecation.
   hookText   String?
-  // Visual hook - what's shown (not said/written) in the first frame/image,
-  // classified separately since these are different signals. One of
-  // CONTENT_HOOKS_VISUAL.
   hookVisual String?
   // Call-to-action category, judged from ALL available signals (caption,
   // transcript, visual description/text) - not scoped to just the opening or

@@ -1,5 +1,5 @@
 // One-off, manually-run backfill: (re)runs the full content-analysis
-// pipeline (transcript/visual analysis, hookText, hookVisual, cta+ctaDetail,
+// pipeline (transcript/visual analysis, hook+hookDetail, cta+ctaDetail,
 // topic, format - see lib/contentClassification.ts's
 // analyzeAndClassifyInstagramPost) for already-scraped Instagram posts.
 //
@@ -47,7 +47,7 @@ async function main() {
       await analyzeAndClassifyInstagramPost(post);
       const updated = await prisma.scrapedInstagramPost.findUniqueOrThrow({ where: { id: post.id } });
       console.log(
-        `[${post.id}] hookText="${updated.hookText}" hookVisual="${updated.hookVisual}" ` +
+        `[${post.id}] hook="${updated.hook}" (${updated.hookDetail?.slice(0, 60)}...) ` +
           `cta="${updated.cta}" (${updated.ctaDetail?.slice(0, 60)}...) topic="${updated.topic}" format="${updated.format}"`
       );
       done++;

@@ -278,3 +278,16 @@ Wciąż otwarte:
 - [ ] Rozważyć naprawienie `lib/creatorAudit.ts` tą samą metodą (Cloudinary zamiast R2+`BACKEND_PUBLIC_URL`), jeśli lokalne testowanie Audytu Twórcy kiedykolwiek na to natrafi.
 
 Kontekst: zgłoszone en passant, kontynuacja pracy nad Inspiracjami z tej samej sesji/dnia (patrz punkty 8-10 wyżej).
+
+## 13. Inspiracje: usunięta analiza AI z filmu YouTube + usunięty formularz "Dodaj inspirację ręcznie" (2026-07-19)
+
+Zgłoszone przez usera: w widoku szczegółów filmu YouTube (Inspiracje) nie chce sekcji "Analiza AI" (streszczenie transkrypcji / obiekcje z komentarzy / powtarzające się tematy) — ma być tylko przeglądanie, z linkiem do oryginału.
+
+Usunięte całościowo (nie tylko z UI - user chciał, żeby tej możliwości po prostu nie było):
+- `routes/youtubeVideos.ts`: endpoint `POST /:id/analyze` + `ANALYZE_ACTIONS`/`analyzeSchema`, import `openai`.
+- `packages/shared/src/index.ts`: typ `YoutubeAnalysisAction` (był używany tylko przez tę funkcję).
+- `YoutubeSection.tsx`'s `VideoDetail`: sekcja "Analiza AI" (3 przyciski) + cały powiązany stan (`runningAction`/`results`/`actionError`/`runAction`). Zamiast tego: link "Zobacz oryginał" → `https://www.youtube.com/watch?v=${videoId}` (`videoId` to już natywne id filmu YouTube, `ScrapedYoutubeVideo.id` w schema.prisma, więc nie trzeba nic dociągać z backendu).
+- Dla konsekwencji nazewnictwa: link do posta na Instagramie w `TrendsFeed.tsx` przemianowany z "Zobacz na Instagramie" na "Zobacz oryginał" (ta sama etykieta na obu platformach, jak user prosił).
+- `InspiracjePage.tsx`: usunięta cała karta/formularz "Dodaj inspirację ręcznie" (`content`/`tags`/`note`/`handleAdd` + pola formularza) — **zostawione** nietknięte: `items`/`loadItems`/`handleDelete`/`FavoritesView`/przycisk serduszka, bo "Zapisz" z `TrendsFeed.tsx` (Instagram) cały czas dopisuje do tej samej listy `InspirationItem` przez `onSaved` - to inna ścieżka do tych samych danych, nie tylko ręczny formularz.
+
+Typecheck + `vite build`/`tsc` (mobile/backend/admin) przechodzą. Nie zweryfikowane wizualnie w przeglądarce.

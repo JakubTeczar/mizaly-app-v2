@@ -120,7 +120,7 @@ async function saveIdeas(source: string, ideas: Idea[]): Promise<void> {
   console.log(`[content-ideas] Stored ${ideas.length} ${source} idea(s).`);
 }
 
-const INSTAGRAM_AXES = ["topic", "format", "hookText", "hookVisual", "cta"] as const;
+const INSTAGRAM_AXES = ["topic", "format", "hook", "cta"] as const;
 
 export async function generateInstagramContentIdeas(): Promise<void> {
   const watchedUsernames = (await prisma.watchedInstagramAccount.findMany()).map((a) => a.username);

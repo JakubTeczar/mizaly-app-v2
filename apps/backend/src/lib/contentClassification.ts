@@ -13,7 +13,6 @@ import {
   CONTENT_FORMATS,
   CONTENT_HOOKS,
   CONTENT_HOOKS_UNIFIED,
-  CONTENT_HOOKS_VISUAL,
   CONTENT_TOPICS,
 } from "@mizaly/shared";
 import { prisma } from "./prisma";
@@ -34,38 +33,47 @@ const CLASSIFICATION_SYSTEM_PROMPT =
   `Formaty (jak jest podana treść): ${CONTENT_FORMATS.join(", ")}.\n` +
   `Hooki (pierwsza linia/otwarcie): ${CONTENT_HOOKS.join(", ")}.`;
 
-// Separate single-axis prompt for lib/mediaAnalysis.ts's callers (see
-// scripts/backfillHookAnalysis.ts): hook here is classified from the post's
-// REAL opening content (video transcript's first seconds, or the cover
-// image's AI description/on-image text) - not the caption, unlike the
-// caption-based `hook` produced by classifyText above via
-// CLASSIFICATION_SYSTEM_PROMPT.
-const HOOK_ONLY_SYSTEM_PROMPT =
-  `Klasyfikujesz WYŁĄCZNIE "hook" - to, co widz widzi lub słyszy w pierwszej chwili (otwierające zdanie ` +
-  `mówione, albo tekst/opis widoczny na pierwszym obrazie), a NIE podpis pod postem. Odpowiedz WYŁĄCZNIE ` +
-  `czystym obiektem JSON {"hook": "..."} bez żadnego innego tekstu. Wartość musi być JEDNĄ z: ` +
-  `${CONTENT_HOOKS.join(", ")} (użyj "inne" tylko gdy naprawdę nic innego nie pasuje).`;
-
-// Visual hook - what's SHOWN (not said/written) in the first frame/image.
-// Separate axis from HOOK_ONLY_SYSTEM_PROMPT above, which fits verbal/textual
-// hooks, not raw imagery.
-const VISUAL_HOOK_SYSTEM_PROMPT =
-  `Klasyfikujesz WYŁĄCZNIE wizualny "hook" na podstawie OPISU tego, co widać na pierwszym obrazie/klatce ` +
-  `posta - nie na podstawie słów, tekstu czy podpisu. Odpowiedz WYŁĄCZNIE czystym obiektem JSON ` +
-  `{"hookVisual": "..."} bez żadnego innego tekstu. Wartość musi być JEDNĄ z: ${CONTENT_HOOKS_VISUAL.join(", ")} ` +
-  `(użyj "inne" tylko gdy naprawdę nic innego nie pasuje).`;
+// Unified hook (replaces the old split hookText/hookVisual axes - that split
+// let a pure camera-framing category like "zbliżenie na twarz" win even when
+// there was real spoken/written content that should have driven the
+// category instead; framing isn't actually a TYPE of hook). For a video: the
+// transcript's opening window is the primary signal, on-screen text from the
+// first frames is secondary/supplementary - NOT a general scene description
+// (per client feedback: "dwóch mężczyzn rozmawia, jeden trzyma telefon" isn't
+// a hook, it's just what the camera happens to be pointed at). For an image
+// post: the first/cover slide's description + on-image text (a post IS just
+// that one image, no cover-vs-real-opening mismatch like video has). Caption
+// is deliberately excluded - a separate, later-read thing.
+const HOOK_SYSTEM_PROMPT =
+  `Analizujesz hook (pierwsze wrażenie) posta na Instagramie - dla Reelsa/wideo to, co jest MÓWIONE w ` +
+  `pierwszych sekundach (transkrypt), a pomocniczo dosłowny tekst widoczny NA EKRANIE w pierwszych klatkach ` +
+  `(nie ogólny opis tego, co się dzieje w kadrze - tylko konkretny napis, jeśli jakiś tam jest); dla zwykłego ` +
+  `zdjęcia/karuzeli to, co widać i jest napisane na PIERWSZYM zdjęciu. NIE podpis pod postem - to osobna, ` +
+  `czytana później rzecz. Odpowiadaj WYŁĄCZNIE PO POLSKU. Odpowiedz WYŁĄCZNIE czystym obiektem JSON ` +
+  `{"hook": "...", "hookDetail": "..."} bez żadnego innego tekstu. "hook" musi być JEDNĄ z: ` +
+  `${CONTENT_HOOKS.join(", ")} - wybierz kategorię na podstawie TREŚCI/NARRACJI otwarcia (o czym mówi, co ` +
+  `obiecuje, jaki problem stawia), NIGDY na podstawie samego kadrowania kamery czy tła - jeśli w pierwszej ` +
+  `chwili naprawdę nic nie jest powiedziane ani napisane, użyj "inne". "hookDetail" to DOSŁOWNY cytat całego ` +
+  `hooka (nie skracaj sztucznie do jednego zdania - podaj go w całości, dokładnie tak jak został powiedziany/ ` +
+  `napisany) - pusty string "" tylko gdy "hook" to "inne".`;
 
 // CTA (call-to-action) - judged from ALL available signals (caption,
 // transcript, visual description/text), not scoped to just the opening or
 // closing moment. Always also returns the literal CTA wording/description in
 // ctaDetail, so information isn't lost behind the "inne" bucket.
 const CTA_SYSTEM_PROMPT =
-  `Znajdujesz "call to action" (CTA) w treści posta na Instagramie - czyli zachętę do konkretnego ` +
-  `działania widza. Przeanalizuj WSZYSTKIE podane informacje (podpis, transkrypt, opis obrazu, tekst z ` +
-  `obrazu). Odpowiedz WYŁĄCZNIE czystym obiektem JSON {"cta": "...", "ctaDetail": "..."} bez żadnego ` +
-  `innego tekstu. "cta" musi być JEDNĄ z: ${CONTENT_CTAS.join(", ")}. "ctaDetail" to krótki (1 zdanie), ` +
-  `dosłowny lub bliski dosłownemu opis/cytat konkretnego CTA użytego w tej treści - zawsze go podaj, ` +
-  `szczególnie ważne gdy "cta" to "inne", żeby nie zgubić informacji o tym, co to dokładnie było.`;
+  `Znajdujesz "call to action" (CTA) w treści posta na Instagramie - czyli JAWNĄ zachętę do konkretnego ` +
+  `działania widza. Przeanalizuj WSZYSTKIE podane informacje (podpis, transkrypt, opis obrazu/klatek, tekst z ` +
+  `obrazu/klatek). Najpierw znajdź KONKRETNY fragment, w którym faktycznie pada wezwanie do działania - ` +
+  `dopiero na jego podstawie ORAZ szerszego kontekstu całej treści wybierz kategorię, nie zgaduj kategorii z ` +
+  `pojedynczych słów wyrwanych z kontekstu. W szczególności "zaproszenie do udziału (wyzwanie/challenge)" ` +
+  `wybierz TYLKO gdy z kontekstu jasno wynika, że chodzi o prawdziwy konkurs/wyzwanie (jest coś do wygrania, ` +
+  `konkretna akcja typu "zostaw komentarz żeby wygrać") - nie wybieraj tej kategorii tylko dlatego, że treść ` +
+  `brzmi zachęcająco albo gdzieś pada słowo "wyzwanie" bez takiego kontekstu. Odpowiedz WYŁĄCZNIE czystym ` +
+  `obiektem JSON {"cta": "...", "ctaDetail": "..."} bez żadnego innego tekstu. "cta" musi być JEDNĄ z: ` +
+  `${CONTENT_CTAS.join(", ")}. "ctaDetail" to DOSŁOWNY cytat całego znalezionego fragmentu (nie skracaj ` +
+  `sztucznie do jednego zdania - podaj go w całości, dokładnie tak jak został napisany/powiedziany) - zawsze ` +
+  `go podaj, szczególnie ważne gdy "cta" to "inne", żeby nie zgubić informacji o tym, co to dokładnie było.`;
 
 // Instagram-only variant of CLASSIFICATION_SYSTEM_PROMPT: topic/format judged
 // from EVERYTHING known about the post (caption + transcript + visual
@@ -94,9 +102,17 @@ const CONCURRENCY = 5;
 const INSTAGRAM_MEDIA_CONCURRENCY = 2;
 // Exported so lib/creatorAudit.ts's own-account-audit pipeline derives the
 // hook-source window the exact same way instead of duplicating the constant.
-// Widened from 5 -> 10s (client feedback: 5s cut off too much of a Reel's
-// real opening beat/line).
-export const HOOK_WINDOW_SECONDS = 10;
+// Narrowed back down from 10s (client feedback: 10s of continuous speech is
+// basically a wall of text, not a hook - a real hook lands in the first
+// couple sentences/~4s). Combined with MAX_HOOK_SEGMENTS below (a rambling
+// person can still say a LOT within 4 seconds).
+export const HOOK_WINDOW_SECONDS = 4;
+// Hard cap on how many transcript segments count as "the hook", regardless
+// of HOOK_WINDOW_SECONDS - client feedback: "dwóch pierwszych zdań, nie całej
+// wypowiedzi" (the first two sentences, not the whole utterance). Whisper's
+// segments are roughly phrase/sentence-sized chunks, not perfect sentences,
+// but a close enough proxy.
+const MAX_HOOK_SEGMENTS = 2;
 const FALLBACK: Classification = { topic: "inne", format: "inne", hook: "inne" };
 
 interface Classification {
@@ -144,44 +160,20 @@ async function classifyText(text: string): Promise<Classification> {
   }
 }
 
-export async function classifyHookFromSource(text: string): Promise<string> {
-  if (!text.trim()) return FALLBACK.hook;
-
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.warn("[content-classification] OPENAI_API_KEY missing - skipping.");
-    return FALLBACK.hook;
-  }
-
-  const client = new OpenAI({ apiKey });
-  const completion = await withOpenAiRetry(() => client.chat.completions.create({
-    model: "gpt-4o-mini",
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: HOOK_ONLY_SYSTEM_PROMPT },
-      { role: "user", content: text.slice(0, 2000) },
-    ],
-  }));
-
-  const raw = completion.choices[0]?.message?.content;
-  if (!raw) return FALLBACK.hook;
-
-  try {
-    const parsed = JSON.parse(raw);
-    return isValid(parsed.hook, CONTENT_HOOKS) ? parsed.hook : "inne";
-  } catch {
-    console.error("[content-classification] Model returned non-JSON output for hook-only call, using fallback.");
-    return FALLBACK.hook;
-  }
+interface HookResult {
+  hook: string;
+  hookDetail: string;
 }
 
-export async function classifyVisualHookFromSource(text: string): Promise<string> {
-  if (!text.trim()) return FALLBACK.hook;
+const FALLBACK_HOOK: HookResult = { hook: "inne", hookDetail: "" };
+
+export async function classifyHook(source: string): Promise<HookResult> {
+  if (!source.trim()) return FALLBACK_HOOK;
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.warn("[content-classification] OPENAI_API_KEY missing - skipping.");
-    return FALLBACK.hook;
+    return FALLBACK_HOOK;
   }
 
   const client = new OpenAI({ apiKey });
@@ -189,20 +181,23 @@ export async function classifyVisualHookFromSource(text: string): Promise<string
     model: "gpt-4o-mini",
     response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: VISUAL_HOOK_SYSTEM_PROMPT },
-      { role: "user", content: text.slice(0, 2000) },
+      { role: "system", content: HOOK_SYSTEM_PROMPT },
+      { role: "user", content: source.slice(0, 3000) },
     ],
   }));
 
   const raw = completion.choices[0]?.message?.content;
-  if (!raw) return FALLBACK.hook;
+  if (!raw) return FALLBACK_HOOK;
 
   try {
     const parsed = JSON.parse(raw);
-    return isValid(parsed.hookVisual, CONTENT_HOOKS_VISUAL) ? parsed.hookVisual : "inne";
+    return {
+      hook: isValid(parsed.hook, CONTENT_HOOKS) ? parsed.hook : "inne",
+      hookDetail: typeof parsed.hookDetail === "string" ? parsed.hookDetail : "",
+    };
   } catch {
-    console.error("[content-classification] Model returned non-JSON output for visual-hook call, using fallback.");
-    return FALLBACK.hook;
+    console.error("[content-classification] Model returned non-JSON output for hook call, using fallback.");
+    return FALLBACK_HOOK;
   }
 }
 
@@ -498,16 +493,17 @@ export async function classifyTopicFormat(text: string): Promise<TopicFormatResu
 }
 
 // Opening-window heuristic: the "hook" is whatever's said in roughly the
-// first HOOK_WINDOW_SECONDS of the video, not the whole transcript - falls
-// back to the full text if nothing starts within that window (fast cuts / a
-// beat of silence at the very start) or there are no segments at all.
+// first HOOK_WINDOW_SECONDS of the video, capped at MAX_HOOK_SEGMENTS
+// regardless (someone can say a lot in 4 seconds) - a hook is the first
+// couple sentences, not a running transcript of the whole opening beat.
+// Falls back to the video's very first segments if none start within the
+// window at all (fast cuts / a beat of silence at the very start), and to
+// the full text only as a last resort if there are no segments whatsoever.
 export function hookSourceFromTranscript(segments: TranscriptSegment[], fullText: string): string {
-  const opening = segments
-    .filter((s) => s.start < HOOK_WINDOW_SECONDS)
-    .map((s) => s.text)
-    .join(" ")
-    .trim();
-  return opening || fullText;
+  if (segments.length === 0) return fullText;
+  const withinWindow = segments.filter((s) => s.start < HOOK_WINDOW_SECONDS);
+  const chosen = (withinWindow.length > 0 ? withinWindow : segments).slice(0, MAX_HOOK_SEGMENTS);
+  return chosen.map((s) => s.text).join(" ").trim() || fullText;
 }
 
 interface InstagramSlideAnalysis {
@@ -546,8 +542,8 @@ async function analyzeAllSlides(imageUrls: string[], postId: string): Promise<In
 
 // Full pipeline for one Instagram post: media analysis (transcript/visual,
 // skip-if-already-present - same spirit as the R2 re-hosting skip in
-// jobs/inspirationScrapeJob.ts), then hookText/hookVisual/cta/topic/format,
-// each judged from the real content now available instead of caption alone.
+// jobs/inspirationScrapeJob.ts), then hook/cta/topic/format, each judged from
+// the real content now available instead of caption alone.
 // Used both by classifyUnclassifiedInstagramPosts (gated by topic: null, new
 // posts only) and scripts/backfillContentAnalysis.ts (explicit
 // --username/--limit re-runs against already-classified historical posts).
@@ -601,9 +597,29 @@ export async function analyzeAndClassifyInstagramPost(post: InstagramPostForAnal
     }
   }
 
-  const hookTextSource = transcript ? hookSourceFromTranscript(transcript.segments, transcript.text) : visualText ?? "";
-  const hookText = await classifyHookFromSource(hookTextSource);
-  const hookVisual = await classifyVisualHookFromSource(visualDescription ?? "");
+  // Video: transcript is the primary signal, on-screen text from the first
+  // frames is secondary - deliberately NOT the frame's scene description (a
+  // generic "two men talking outside" isn't a hook, it's just what the
+  // camera happened to be pointed at). Post: the first slide IS the whole
+  // opening moment, so both its description and on-image text are fair game.
+  let hookSource: string;
+  if (post.videoUrl) {
+    const transcriptWindow = transcript ? hookSourceFromTranscript(transcript.segments, transcript.text) : "";
+    hookSource = [
+      transcriptWindow ? `Transkrypt pierwszych ${HOOK_WINDOW_SECONDS}s: ${transcriptWindow}` : "",
+      visualText ? `Tekst na ekranie w pierwszych klatkach: ${visualText}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  } else {
+    hookSource = [
+      visualDescription ? `Opis zdjęcia: ${visualDescription}` : "",
+      visualText ? `Tekst na zdjęciu: ${visualText}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  const { hook, hookDetail } = await classifyHook(hookSource);
 
   // Every slide's text (not just the cover) feeds CTA/topic/format - a CTA or
   // topic-defining detail can sit on any slide, often the last one. Falls
@@ -619,7 +635,7 @@ export async function analyzeAndClassifyInstagramPost(post: InstagramPostForAnal
 
   await prisma.scrapedInstagramPost.update({
     where: { id: post.id },
-    data: { hookText, hookVisual, cta, ctaDetail, topic, format },
+    data: { hook, hookDetail, cta, ctaDetail, topic, format },
   });
 }
 

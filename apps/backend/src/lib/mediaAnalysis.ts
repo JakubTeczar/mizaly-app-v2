@@ -48,6 +48,44 @@ export interface VideoTranscript {
   segments: TranscriptSegment[];
 }
 
+// Whisper hard-caps uploads at 25MB (26214400 bytes, per its own 413 error
+// message) - a Reel's raw MP4 buffer occasionally exceeds this (long/high-
+// bitrate video). Rather than give up with no transcript at all (client
+// feedback: a partial transcript beats none), extract just the audio track -
+// a Reel's video stream is the vast majority of its size, so compressed
+// audio-only is tiny by comparison and fixes virtually every real case on
+// its own. A bit under the hard cap so the output file's own container
+// overhead doesn't push it back over the real limit.
+const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
+const AUDIO_EXTRACT_TARGET_BYTES = 24 * 1024 * 1024;
+
+// If the extracted audio is STILL over the target (a genuinely very long
+// recording), ffmpeg's own `-fs` flag truncates the OUTPUT at that byte
+// count during encoding rather than failing - producing a valid (if
+// partial, cut off at the end) audio file instead of nothing.
+async function extractCompressedAudio(videoBuffer: Buffer): Promise<Buffer> {
+  const tmpDir = os.tmpdir();
+  const id = crypto.randomUUID();
+  const inPath = path.join(tmpDir, `${id}-in.mp4`);
+  const outPath = path.join(tmpDir, `${id}-out.mp3`);
+  try {
+    await fs.writeFile(inPath, videoBuffer);
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-i", inPath,
+      "-vn",
+      "-acodec", "libmp3lame",
+      "-b:a", "64k",
+      "-fs", String(AUDIO_EXTRACT_TARGET_BYTES),
+      outPath,
+    ]);
+    return await fs.readFile(outPath);
+  } finally {
+    await fs.unlink(inPath).catch(() => {});
+    await fs.unlink(outPath).catch(() => {});
+  }
+}
+
 export async function transcribeVideo(mediaUrl: string, postId: string): Promise<VideoTranscript | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -56,9 +94,22 @@ export async function transcribeVideo(mediaUrl: string, postId: string): Promise
   }
 
   try {
-    const buffer = await fetchMediaBuffer(r2Filename(mediaUrl, postId));
+    let buffer = await fetchMediaBuffer(r2Filename(mediaUrl, postId));
+    let filename = r2Filename(mediaUrl, postId);
+    let mimeType = "video/mp4";
+
+    if (buffer.length > WHISPER_MAX_BYTES) {
+      console.warn(
+        `[media-analysis] ${postId} video is ${buffer.length} bytes (over Whisper's ${WHISPER_MAX_BYTES}-byte ` +
+          `cap) - extracting compressed audio instead of sending the full video.`
+      );
+      buffer = await extractCompressedAudio(buffer);
+      filename = `${postId}.mp3`;
+      mimeType = "audio/mpeg";
+    }
+
     const client = new OpenAI({ apiKey });
-    const file = await toFile(buffer, r2Filename(mediaUrl, postId), { type: "video/mp4" });
+    const file = await toFile(buffer, filename, { type: mimeType });
     const response = await withOpenAiRetry(() => client.audio.transcriptions.create({
       model: "whisper-1",
       file,
