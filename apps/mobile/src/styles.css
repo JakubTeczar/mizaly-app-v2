@@ -1742,6 +1742,16 @@ a {
   background: var(--color-border);
 }
 
+/* Reels are 9:16 portrait video - the shared square-ish box above crops them
+   hard. Videos get their own taller, portrait-ratio box instead; photos
+   (img.group-item-carousel-media) keep the rule above unchanged. */
+video.group-item-carousel-media {
+  max-height: none;
+  aspect-ratio: 9 / 16;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
 .group-item-carousel-media--empty {
   height: 160px;
 }
