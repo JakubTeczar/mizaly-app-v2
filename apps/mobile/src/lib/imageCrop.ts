@@ -5,6 +5,11 @@
 // the user crop manually, we clamp automatically: images already inside the
 // range pass through untouched, others get center-cropped to the nearest
 // edge of the allowed range.
+//
+// fileToDataUrl/normalizeToJpeg/readImageDimensions used to live here too but
+// moved to @mizaly/shared/src/carousel/imageHelpers.ts so the carousel slide
+// editor (shared between mobile and admin) doesn't depend on mobile's own
+// lib - only this post-photo-specific crop stays mobile-only.
 const MIN_RATIO = 0.8; // 4:5 portrait
 const MAX_RATIO = 1.91; // landscape
 
@@ -14,15 +19,6 @@ function loadImage(dataUrl: string): Promise<HTMLImageElement> {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("Nie udało się wczytać obrazu."));
     img.src = dataUrl;
-  });
-}
-
-export function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("Nie udało się odczytać pliku."));
-    reader.readAsDataURL(file);
   });
 }
 
@@ -63,21 +59,4 @@ export async function cropToSafeAspectRatio(dataUrl: string): Promise<string> {
 
   ctx.drawImage(img, sourceX, sourceY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
   return canvas.toDataURL("image/jpeg", 0.9);
-}
-
-// Decodes an image and re-encodes it as JPEG via canvas, without cropping.
-// Used for photos that get center-cropped to a square later on (carousel
-// slide backgrounds), but that still need to fail fast here on undecodable
-// source formats (e.g. HEIC straight from an iPhone) instead of uploading
-// successfully and only breaking later, silently, when the canvas renderer
-// tries to display them.
-export async function normalizeToJpeg(dataUrl: string): Promise<string> {
-  const img = await loadImage(dataUrl);
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return dataUrl;
-  ctx.drawImage(img, 0, 0);
-  return canvas.toDataURL("image/jpeg", 0.92);
 }

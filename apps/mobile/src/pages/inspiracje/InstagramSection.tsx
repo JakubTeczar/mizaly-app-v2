@@ -5,37 +5,6 @@ import { TrendsFeed } from "./TrendsFeed";
 import { WatchlistManager } from "./WatchlistManager";
 import { AccountStatsPanel } from "./AccountStatsPanel";
 
-interface WipResponse {
-  status: string;
-  message: string;
-}
-
-function WipCard({ title, endpoint }: { title: string; endpoint: string }) {
-  const [message, setMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .get<WipResponse>(endpoint)
-      .then((res) => {
-        if (!cancelled) setMessage(res.message);
-      })
-      .catch(() => {
-        if (!cancelled) setMessage("Ta funkcja jest w budowie.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [endpoint]);
-
-  return (
-    <section className="card">
-      <h2>{title}</h2>
-      <p className="card-muted-text">{message ?? "Ładowanie…"}</p>
-    </section>
-  );
-}
-
 export function InstagramSection({ onSaved }: { onSaved: (item: InspirationItem) => void }) {
   const [accounts, setAccounts] = useState<WatchedInstagramAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -78,7 +47,6 @@ export function InstagramSection({ onSaved }: { onSaved: (item: InspirationItem)
       />
       <AccountStatsPanel />
       <TrendsFeed onSaved={onSaved} />
-      <WipCard title="Analiza konkurencji" endpoint="/api/inspiration/competitors" />
     </>
   );
 }

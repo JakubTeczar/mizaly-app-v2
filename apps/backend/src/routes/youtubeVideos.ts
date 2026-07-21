@@ -114,6 +114,90 @@ router.get(
   })
 );
 
+// Latest cached batch of AI-generated content ideas (see
+// lib/contentIdeas.ts), refreshed at the end of each scrape job run. Reads
+// only - the job is what generates and stores these, not this endpoint.
+// Registered before the "/:id" route below so "content-ideas" isn't matched
+// as a video id.
+router.get(
+  "/content-ideas",
+  asyncHandler(async (_req, res) => {
+    const latest = await prisma.contentIdeaSet.findFirst({
+      where: { source: "youtube" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ ideas: latest?.ideas ?? [], generatedAt: latest?.createdAt.toISOString() ?? null });
+  })
+);
+
+// Per-channel scrape coverage - mirrors routes/inspiration.ts's
+// /instagram-account-stats, so it's obvious why a given channel isn't showing
+// up yet in the classification ranking (too few mature/classified videos)
+// instead of that just being a mystery. Registered before "/:id" so
+// "channel-stats" isn't matched as a video id.
+router.get(
+  "/channel-stats",
+  asyncHandler(async (_req, res) => {
+    const watchedChannels = await prisma.watchedYoutubeChannel.findMany({ orderBy: { createdAt: "asc" } });
+    const channels = await Promise.all(
+      watchedChannels.map(async (channel) => {
+        const [videoCount, latestVideo] = await Promise.all([
+          prisma.scrapedYoutubeVideo.count({ where: { channelHandle: channel.handle } }),
+          prisma.scrapedYoutubeVideo.findFirst({
+            where: { channelHandle: channel.handle },
+            orderBy: { publishedAt: "desc" },
+          }),
+        ]);
+        return {
+          handle: channel.handle,
+          displayName: channel.displayName,
+          videoCount,
+          lastScrapedAt: latestVideo?.scrapedAt.toISOString() ?? null,
+          lastPublishedAt: latestVideo?.publishedAt?.toISOString() ?? null,
+          thumbnailUrl: latestVideo?.thumbnailUrl || null,
+        };
+      })
+    );
+    res.json({ channels });
+  })
+);
+
+// Latest cached comment segmentation (see lib/commentClustering.ts),
+// refreshed at the end of each scrape job run - same read-only pattern as
+// /content-ideas above. Also registered before "/:id" for the same reason.
+router.get(
+  "/comment-clusters",
+  asyncHandler(async (_req, res) => {
+    const latest = await prisma.commentClusterSet.findFirst({
+      where: { source: "youtube" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ clusters: latest?.clusters ?? [], generatedAt: latest?.createdAt.toISOString() ?? null });
+  })
+);
+
+router.get(
+  "/question-clusters",
+  asyncHandler(async (_req, res) => {
+    const latest = await prisma.commentClusterSet.findFirst({
+      where: { source: "youtube_questions" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ clusters: latest?.clusters ?? [], generatedAt: latest?.createdAt.toISOString() ?? null });
+  })
+);
+
+router.get(
+  "/pain-point-clusters",
+  asyncHandler(async (_req, res) => {
+    const latest = await prisma.commentClusterSet.findFirst({
+      where: { source: "youtube_pain_points" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ clusters: latest?.clusters ?? [], generatedAt: latest?.createdAt.toISOString() ?? null });
+  })
+);
+
 router.get(
   "/:id",
   asyncHandler(async (req, res) => {

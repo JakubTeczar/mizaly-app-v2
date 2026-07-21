@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Organization, User, UserRole, ZernioApiKeyOption } from "@mizaly/shared";
 import { apiClient, ApiError } from "../lib/apiClient";
+import { ClosingSlideEditor } from "../components/ClosingSlideEditor";
 
 type OrganizationWithUsers = Organization & { users: User[] };
 
@@ -39,6 +40,8 @@ export default function OrganizationsPage() {
   const [contextValue, setContextValue] = useState("");
   const [contextError, setContextError] = useState<string | null>(null);
   const [isSavingContext, setIsSavingContext] = useState(false);
+
+  const [editingClosingSlide, setEditingClosingSlide] = useState<OrganizationWithUsers | null>(null);
 
   async function loadAll() {
     setIsLoading(true);
@@ -199,6 +202,15 @@ export default function OrganizationsPage() {
     }
   }
 
+  function openClosingSlideForm(org: OrganizationWithUsers) {
+    setEditingClosingSlide(org);
+    setSuccessMessage(null);
+  }
+
+  function closeClosingSlideForm() {
+    setEditingClosingSlide(null);
+  }
+
   const rows = organizations.flatMap((org) => org.users.map((user) => ({ org, user })));
 
   return (
@@ -356,6 +368,18 @@ export default function OrganizationsPage() {
         </div>
       )}
 
+      {editingClosingSlide && (
+        <ClosingSlideEditor
+          organization={editingClosingSlide}
+          onClose={closeClosingSlideForm}
+          onSaved={(organization) => {
+            setEditingClosingSlide(null);
+            setSuccessMessage(`Slajd zamykający dla organizacji ${organization.name} został zapisany.`);
+            loadAll();
+          }}
+        />
+      )}
+
       {isLoading && <p>Ładowanie…</p>}
       {loadError && <div className="form-error">{loadError}</div>}
 
@@ -382,9 +406,12 @@ export default function OrganizationsPage() {
               <tr key={user.id}>
                 <td>
                   {org.name}
-                  <div style={{ marginTop: 6 }}>
+                  <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
                     <button type="button" className="secondary" onClick={() => openContextForm(org)}>
                       Kontekst AI
+                    </button>
+                    <button type="button" className="secondary" onClick={() => openClosingSlideForm(org)}>
+                      Slajd zamykający
                     </button>
                   </div>
                 </td>

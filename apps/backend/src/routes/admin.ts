@@ -6,6 +6,9 @@ import { asyncHandler } from "../lib/asyncHandler";
 import { HttpError } from "../lib/httpError";
 import { requireAdminAuth } from "../middleware/requireAdminAuth";
 import { hasAnyConfiguredZernioApiKey, listConfiguredZernioApiKeys } from "../integrations/zernioApiKeys";
+import { isCloudinaryConfigured, uploadMedia } from "../integrations/cloudinary";
+import { carouselSlideSchema } from "../lib/carouselSlideSchema";
+import { Prisma } from "@prisma/client";
 
 const router = Router();
 
@@ -26,6 +29,11 @@ const updateUserSchema = z.object({
 
 const updateOrganizationSchema = z.object({
   aiContext: z.string().max(4000).nullable().optional(),
+  closingSlideTemplate: carouselSlideSchema.nullable().optional(),
+});
+
+const uploadClosingSlideImageSchema = z.object({
+  dataUrl: z.string().min(1),
 });
 
 function toPublicUser(user: {
@@ -46,9 +54,14 @@ function toPublicUser(user: {
   };
 }
 
-// Zernio hard-caps each API key at 2 connected accounts, so no more than 2
-// users may share the same zernioApiKeyId. Called before both create and
-// update so the limit can't be bypassed either way.
+// Zernio itself allows unlimited connected accounts per API key, but only the
+// first 2 are free - each additional one is paid. This client has paid for
+// one extra slot, so the self-imposed ceiling here is 3 (2 free + 1 paid),
+// not Zernio's own hard limit - it exists purely so nobody accidentally
+// connects a 4th account and racks up an unexpected charge. Called before
+// both create and update so the limit can't be bypassed either way.
+const ZERNIO_ACCOUNTS_PER_KEY_LIMIT = 3;
+
 async function assertZernioApiKeySlotAvailable(zernioApiKeyId: string, excludeUserId?: string): Promise<void> {
   const count = await prisma.user.count({
     where: {
@@ -56,8 +69,11 @@ async function assertZernioApiKeySlotAvailable(zernioApiKeyId: string, excludeUs
       ...(excludeUserId ? { id: { not: excludeUserId } } : {}),
     },
   });
-  if (count >= 2) {
-    throw new HttpError(409, `Do tego klucza Zernio API są już przypisani 2 użytkownicy (limit Zernio).`);
+  if (count >= ZERNIO_ACCOUNTS_PER_KEY_LIMIT) {
+    throw new HttpError(
+      409,
+      `Do tego klucza Zernio API są już przypisani ${ZERNIO_ACCOUNTS_PER_KEY_LIMIT} użytkownicy (ustawiony limit, 2 darmowe + 1 płatne).`
+    );
   }
 }
 
@@ -175,10 +191,44 @@ router.patch(
       // Only overwrite when explicitly present in the body (including
       // explicit null to clear it) - an omitted field must leave the
       // existing value untouched.
-      data: "aiContext" in req.body ? { aiContext: data.aiContext ?? null } : {},
+      data: {
+        ...("aiContext" in req.body ? { aiContext: data.aiContext ?? null } : {}),
+        ...("closingSlideTemplate" in req.body
+          ? { closingSlideTemplate: data.closingSlideTemplate ?? Prisma.DbNull }
+          : {}),
+      },
     });
 
     res.json(organization);
+  })
+);
+
+// Uploads an image (background or an inset image layer) for this
+// organization's carousel closing-slide template - used by admin's
+// ClosingSlideEditor.tsx as the `onUploadImage` callback for the shared
+// canvas editor (packages/shared/src/carousel/SlideCanvasEditor.tsx), same
+// role as /api/media/upload plays for a regular user. Returns just the url,
+// not the organization, since the caller decides itself whether that url
+// becomes the background or a new image layer.
+router.post(
+  "/organizations/:id/closing-slide-image",
+  asyncHandler(async (req, res) => {
+    if (!isCloudinaryConfigured()) {
+      throw new HttpError(503, "Cloudinary nie jest skonfigurowane.");
+    }
+
+    const { dataUrl } = uploadClosingSlideImageSchema.parse(req.body);
+    if (!dataUrl.startsWith("data:")) {
+      throw new HttpError(400, "Oczekiwano pliku w formacie data URL.");
+    }
+
+    const existing = await prisma.organization.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      throw new HttpError(404, "Nie znaleziono organizacji.");
+    }
+
+    const result = await uploadMedia(dataUrl, `mizaly/${existing.id}`, { format: "jpg" });
+    res.status(201).json({ url: result.url });
   })
 );
 

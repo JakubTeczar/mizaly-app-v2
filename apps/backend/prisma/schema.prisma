@@ -56,15 +56,27 @@ model Organization {
   // 10 years experience") so the AI post interview (routes/ai.ts) doesn't
   // waste questions on things already known about this organization.
   aiContext       String?
+  // Admin-configured template for the last slide of every new carousel this
+  // organization creates (e.g. a fixed "DM me to work together" CTA photo) -
+  // a full CarouselSlide (background + text/image layers, see
+  // packages/shared/src/index.ts), designed in the admin panel via the same
+  // canvas editor mobile uses (packages/shared/src/carousel/
+  // SlideCanvasEditor.tsx). CarouselSlideEditor.tsx (apps/mobile) auto-
+  // appends it to a brand-new carousel, and its layers stay editable
+  // per-post from there on, same as any other slide.
+  closingSlideTemplate Json?
   createdAt       DateTime @default(now())
 
-  users             User[]
-  socialAccounts    SocialAccount[]
-  posts             Post[]
-  reels             Reel[]
-  websiteArticles   WebsiteArticle[]
-  inspirationItems  InspirationItem[]
-  conversations     Conversation[]
+  users               User[]
+  socialAccounts      SocialAccount[]
+  posts               Post[]
+  reels               Reel[]
+  websiteArticles     WebsiteArticle[]
+  inspirationItems    InspirationItem[]
+  conversations       Conversation[]
+  creatorAuditAccount CreatorAuditAccount?
+  creatorAuditPosts   CreatorAuditPost[]
+  contentTransferPosts ContentTransferPost[]
 }
 
 model User {
@@ -109,6 +121,40 @@ model SocialAccount {
   conversations Conversation[]
 
   @@unique([organizationId, zernioAccountId])
+  @@index([organizationId])
+}
+
+// Cache of an organization's own last N (see CONTENT_TRANSFER_POST_LIMIT in
+// lib/contentTransfer.ts) published Instagram posts, kept just long enough
+// to let "Przenoszenie treści z IG" (see ContentTransferSection.tsx) cross-post
+// them to other connected platforms via Zernio. Refreshed by
+// jobs/contentTransferScrapeJob.ts on a staleness check, not on every page
+// view. `id` is a generated cuid rather than Instagram's own shortcode -
+// same reasoning as CreatorAuditPost below (two organizations could in
+// principle share the same connected IG account) - `instagramPostId` keeps
+// the raw shortcode for the (organizationId, instagramPostId) upsert key.
+model ContentTransferPost {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  instagramPostId String
+  url             String
+  caption         String       @db.Text
+  imageUrl        String?
+  videoUrl        String?
+  isReel          Boolean      @default(false)
+  postedAt        DateTime?
+  scrapedAt       DateTime     @default(now())
+  // Which platforms this post has already been cross-posted to and when -
+  // { [SocialPlatform]: ISO date string }, written by the publish endpoint
+  // (routes/contentTransfer.ts) right after a successful Zernio publish, read
+  // by ContentTransferSection.tsx to show an "already transferred" badge per
+  // platform. Tracked here (not asked of Zernio) since this content is
+  // already in our own DB either way, and Zernio has no notion of "this is a
+  // transfer of IG post X" to query back.
+  transferredTo   Json?
+
+  @@unique([organizationId, instagramPostId])
   @@index([organizationId])
 }
 
@@ -223,6 +269,11 @@ model ScrapedInstagramPost {
   type           String
   caption        String    @db.Text
   imageUrl       String
+  // ALL re-hosted slide images for an image/carousel post (every slide, not
+  // just the cover) - empty for a video/Reel post. `imageUrl` above stays the
+  // cover/display thumbnail; this is what lets classification analyze every
+  // slide instead of just the first one - see slideAnalysis below.
+  imageUrls      String[]
   videoUrl       String?
   isReel         Boolean   @default(false)
   likesCount     Int       @default(0)
@@ -243,12 +294,24 @@ model ScrapedInstagramPost {
   // (start/end in seconds - straight from Whisper's verbose_json segments).
   transcript        Json?
   // Populated by lib/mediaAnalysis.ts for image posts (GPT-4o-mini vision):
-  // short Polish description of what's shown in the cover/first-slide image.
+  // short Polish description of what's shown in the cover/FIRST slide only -
+  // hook is deliberately judged from the opening slide alone (see hookText/
+  // hookVisual below), same "hook = first moment" semantics as
+  // lib/creatorAudit.ts. Every slide (not just this one) still gets analyzed -
+  // see slideAnalysis below, which feeds topic/format/cta instead.
   visualDescription String?  @db.Text
-  // Literal text the model reads off the image itself (on-image captions/
-  // labels) - kept separate from visualDescription since hook classification
-  // treats "what's shown" and "what's literally written" as distinct signals.
+  // Literal text the model reads off the FIRST slide only - kept separate
+  // from visualDescription since hook classification treats "what's shown"
+  // and "what's literally written" as distinct signals.
   visualText        String?  @db.Text
+  // One entry per carousel slide (image/carousel posts only, each slide
+  // analyzed separately so a CTA/topic-relevant detail that only appears on
+  // e.g. the last slide is still found - same rationale as CreatorAuditPost's
+  // slideAnalysis below). Null for video/Reel posts (analyzeVideoFrames's
+  // combined result already covers the video's opening via visualDescription/
+  // visualText above - a video has no further "slides").
+  // Shape: Array<{ source: string; description: string; extractedText: string }>
+  slideAnalysis     Json?
   // Verbal/textual hook (spoken opening line for video, on-image text for
   // images) - see lib/contentClassification.ts's classifyHookFromSource.
   // Supersedes the legacy `hook` column for Instagram going forward; `hook`
@@ -305,6 +368,33 @@ model InspirationAnalysis {
   @@index([source, createdAt])
 }
 
+// Structured content-idea suggestions generated at the end of each Instagram/
+// YouTube scrape job run, from the same classification-group rankings shown
+// in ClassificationRanking. Same "create-only, newest row per source wins"
+// pattern as InspirationAnalysis, but structured JSON instead of free text.
+model ContentIdeaSet {
+  id        String   @id @default(cuid())
+  source    String // "instagram" | "youtube"
+  ideas     Json // Array<{ title: string; rationale: string }>
+  createdAt DateTime @default(now())
+
+  @@index([source, createdAt])
+}
+
+// Cached comment segmentation for the Inspiracje "Segmentacja komentarzy"
+// section (see lib/commentClustering.ts) - same create-only, newest-row-per-
+// source caching pattern as ContentIdeaSet above, refreshed at the end of
+// each scrape job run. clusters shape: Array<{ label: string; count: number;
+// exampleComments: string[] }>, already ranked by size (largest first).
+model CommentClusterSet {
+  id        String   @id @default(cuid())
+  source    String // "instagram" (only source for now)
+  clusters  Json
+  createdAt DateTime @default(now())
+
+  @@index([source, createdAt])
+}
+
 // Instagram accounts watched by the scrape job - editable from the
 // Inspiracje > Instagram tab. Global list, same rationale as
 // ScrapedInstagramPost (see comment there): per-tenant config is a later step.
@@ -312,6 +402,105 @@ model WatchedInstagramAccount {
   id        String   @id @default(cuid())
   username  String   @unique
   createdAt DateTime @default(now())
+}
+
+// Per-organization audit of ONE creator's OWN Instagram posting history - the
+// admin panel's "Audyt tworcy" tab (routes/adminCreatorAudit.ts, lib/
+// creatorAudit.ts). Deliberately a fully separate table/pipeline from
+// ScrapedInstagramPost/WatchedInstagramAccount above: those are a GLOBAL
+// watchlist of OTHER accounts shared by every organization for cross-account
+// trend-spotting inspiration (Inspiracje) - mixing a client's own account in
+// there would leak their content into every other organization's shared
+// trends feed. One audited account per organization for now.
+model CreatorAuditAccount {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  username       String
+  createdAt      DateTime     @default(now())
+  lastScrapedAt  DateTime?
+}
+
+// Same fields/classification shape as ScrapedInstagramPost, reusing the same
+// scraper (integrations/instagramScraper.ts) and per-signal classification
+// helpers (lib/mediaAnalysis.ts, lib/contentClassification.ts) - see lib/
+// creatorAudit.ts. `id` is a generated cuid, not Instagram's shortcode
+// (unlike ScrapedInstagramPost), because two different organizations could
+// in principle audit the same public creator and Instagram's shortcode isn't
+// scoped per-organization - `instagramPostId` keeps that raw id for
+// reference/R2-media-key purposes without risking a primary-key collision.
+model CreatorAuditPost {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  username        String
+  instagramPostId String
+  url             String
+  type            String
+  caption         String       @db.Text
+  // ALL images for an image/carousel post (every slide) - empty array for a
+  // video/Reel post, which is intentionally NOT given a cover image at all
+  // (see integrations/instagramScraper.ts) - the real opening is the
+  // extracted video frames instead (see transcript/slideAnalysis below).
+  imageUrls       String[]
+  videoUrl        String?
+  isReel          Boolean      @default(false)
+  likesCount      Int          @default(0)
+  commentsCount   Int          @default(0)
+  videoViewCount  Int?
+  postedAt        DateTime?
+  scrapedAt       DateTime     @default(now())
+  transcript        Json?
+  // One entry per carousel slide (image/carousel posts, each slide analyzed
+  // separately so a CTA on e.g. only the last slide can still be found), or
+  // a single entry for the combined multi-frame analysis (video/Reel posts).
+  // Shape: Array<{ source: string; description: string; extractedText: string }>
+  slideAnalysis     Json?
+  // Exactly one of hookVideo/hookPost is ever populated per row, depending on
+  // whether the post has a videoUrl (Reel) or imageUrls (post/carousel) -
+  // judged from BOTH what's shown and said/written together (see lib/
+  // contentClassification.ts's classifyVideoHook/classifyPostHook), not as
+  // two separate text/visual axes like the legacy ScrapedInstagramPost.
+  hookVideo       String?
+  hookVideoDetail String?  @db.Text
+  hookPost        String?
+  hookPostDetail  String?  @db.Text
+  cta         String?
+  ctaDetail   String?  @db.Text
+  // Where the CTA actually sits - "treść główna" (in the Reel/image itself)
+  // vs "opis" (the caption) vs "oba" vs "brak" - see classifyCtaWithLocation.
+  ctaLocation String?
+  topic       String?
+  format      String?
+  // Literal quoted fragment justifying the format classification (mirrors
+  // ctaDetail) - see lib/contentClassification.ts's classifyTopicFormat.
+  formatDetail String? @db.Text
+
+  comments CreatorAuditComment[]
+
+  @@unique([organizationId, username, postedAt])
+  @@index([organizationId])
+}
+
+// Comments for an audited creator's own posts - unlike the legacy
+// ScrapedInstagramComment (opt-in via INSTAGRAM_FETCH_COMMENTS, since that's
+// a shared global watchlist where the extra Scrape.do cost multiplies across
+// every watched account), this is always fetched for every new
+// CreatorAuditPost - the whole point of an audit is having the full picture
+// for one specific client's account. Fetched once per post, the first time
+// it's scraped, never refreshed on a later re-fetch of the same post.
+model CreatorAuditComment {
+  id             String   @id
+  postId         String
+  post           CreatorAuditPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author         String
+  authorId       String?
+  authorVerified Boolean  @default(false)
+  text           String   @db.Text
+  likeCount      Int      @default(0)
+  postedAt       DateTime?
+
+  @@index([postId])
 }
 
 // YouTube channels watched by the scrape job - editable from the

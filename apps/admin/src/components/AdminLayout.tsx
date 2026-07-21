@@ -21,6 +21,9 @@ export default function AdminLayout() {
           <NavLink to="/organizations" className={({ isActive }) => (isActive ? "active" : "")}>
             👥 Organizacje i użytkownicy
           </NavLink>
+          <NavLink to="/creator-audit" className={({ isActive }) => (isActive ? "active" : "")}>
+            🔍 Audyt tworcy
+          </NavLink>
           <NavLink to="/system" className={({ isActive }) => (isActive ? "active" : "")}>
             ⚙️ Konfiguracja systemu
           </NavLink>

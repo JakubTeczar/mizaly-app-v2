@@ -10,6 +10,7 @@ import {
   ShareIcon,
   ThumbsUpIcon,
 } from "../../components/SocialIcons";
+import { ChevronIcon } from "../../components/ChevronIcon";
 
 interface PostPreviewProps {
   heading: string;
@@ -61,7 +62,7 @@ function PreviewImageCarousel({ imageUrls }: { imageUrls: string[] }) {
             onClick={() => goTo(clampedIndex - 1)}
             disabled={clampedIndex === 0}
           >
-            ‹
+            <ChevronIcon direction="left" />
           </button>
           <button
             type="button"
@@ -70,7 +71,7 @@ function PreviewImageCarousel({ imageUrls }: { imageUrls: string[] }) {
             onClick={() => goTo(clampedIndex + 1)}
             disabled={clampedIndex === imageUrls.length - 1}
           >
-            ›
+            <ChevronIcon direction="right" />
           </button>
           <div className="preview-carousel-dots">
             {imageUrls.map((_, i) => (

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { InspirationItem } from "@mizaly/shared";
 import { apiClient, ApiError } from "../lib/apiClient";
 import { FavoritesView } from "./inspiracje/FavoritesView";
@@ -6,6 +6,7 @@ import { InspirationSourceBar, type InspirationSource } from "./inspiracje/Inspi
 import { InstagramSection } from "./inspiracje/InstagramSection";
 import { YoutubeSection } from "./inspiracje/YoutubeSection";
 import { NewsletterSection } from "./inspiracje/NewsletterSection";
+import { FEATURE_FLAGS } from "../lib/featureFlags";
 
 export function InspiracjePage() {
   const [items, setItems] = useState<InspirationItem[]>([]);
@@ -14,6 +15,27 @@ export function InspiracjePage() {
 
   const [activeSource, setActiveSource] = useState<InspirationSource>("instagram");
   const [showFavorites, setShowFavorites] = useState(false);
+
+  // Remembers where the user was scrolled to on each source tab, so
+  // switching back to a tab they've already been on resumes where they left
+  // off - but a tab visited for the first time this session always starts at
+  // the top, it never inherits the previous tab's scroll position.
+  const scrollPositions = useRef<Partial<Record<InspirationSource, number>>>({});
+  const visitedSources = useRef<Set<InspirationSource>>(new Set([activeSource]));
+
+  useEffect(() => {
+    const alreadyVisited = visitedSources.current.has(activeSource);
+    visitedSources.current.add(activeSource);
+
+    // Double rAF so this runs after the newly-switched-to section has had its
+    // first paint (its own data may still be loading, but the layout that
+    // exists so far is enough to scroll within).
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo(0, alreadyVisited ? scrollPositions.current[activeSource] ?? 0 : 0);
+      });
+    });
+  }, [activeSource]);
 
   const [content, setContent] = useState("");
   const [tags, setTags] = useState("");
@@ -71,6 +93,13 @@ export function InspiracjePage() {
 
   return (
     <div>
+      {(FEATURE_FLAGS.inspiracjeNewsletter || FEATURE_FLAGS.inspiracjePolubienia) && (
+        <p className="info-note" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="badge-coming-soon">Wkrótce</span>
+          Zakładka Newslettery i lista polubionych inspiracji będą dostępne wkrótce.
+        </p>
+      )}
+
       <h1 className="page-title">Inspiracje</h1>
 
       {showFavorites ? (
@@ -131,6 +160,8 @@ export function InspiracjePage() {
       <InspirationSourceBar
         activeSource={activeSource}
         onSourceChange={(source) => {
+          if (source === activeSource) return;
+          scrollPositions.current[activeSource] = window.scrollY;
           setActiveSource(source);
           setShowFavorites(false);
         }}

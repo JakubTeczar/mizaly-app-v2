@@ -5,6 +5,7 @@ import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import OrganizationsPage from "./pages/OrganizationsPage";
 import SystemConfigPage from "./pages/SystemConfigPage";
+import CreatorAuditPage from "./pages/CreatorAuditPage";
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="organizations" element={<OrganizationsPage />} />
+        <Route path="creator-audit" element={<CreatorAuditPage />} />
         <Route path="system" element={<SystemConfigPage />} />
       </Route>
 

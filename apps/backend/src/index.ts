@@ -8,11 +8,13 @@ import { createSocketServer } from "./socket";
 import { startInspirationScrapeScheduler } from "./jobs/inspirationScrapeJob";
 import { startYoutubeScrapeScheduler } from "./jobs/youtubeScrapeJob";
 import { startNewsletterFetchScheduler } from "./jobs/newsletterFetchJob";
+import { startContentTransferScrapeScheduler } from "./jobs/contentTransferScrapeJob";
 import { ensureDefaultWatchlists } from "./lib/watchlistSeed";
 
 import authRouter from "./routes/auth";
 import adminAuthRouter from "./routes/adminAuth";
 import adminRouter from "./routes/admin";
+import adminCreatorAuditRouter from "./routes/adminCreatorAudit";
 import postsRouter from "./routes/posts";
 import reelsRouter from "./routes/reels";
 import websiteArticlesRouter from "./routes/websiteArticles";
@@ -26,9 +28,11 @@ import { conversationsRouter, messagesRouter } from "./routes/conversations";
 import aiRouter from "./routes/ai";
 import socialAccountsRouter from "./routes/socialAccounts";
 import mediaRouter from "./routes/media";
+import organizationsRouter from "./routes/organizations";
 import analyticsRouter from "./routes/analytics";
 import mediaPreviewRouter from "./routes/mediaPreview";
 import inspirationMediaRouter from "./routes/inspirationMedia";
+import contentTransferRouter from "./routes/contentTransfer";
 import path from "path";
 import { INSPIRATION_MEDIA_ROUTE } from "./lib/r2Store";
 
@@ -59,6 +63,7 @@ app.get("/health", (_req, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/admin/auth", adminAuthRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/admin/creator-audit", adminCreatorAuditRouter);
 app.use("/api/posts", postsRouter);
 app.use("/api/reels", reelsRouter);
 app.use("/api/website-articles", websiteArticlesRouter);
@@ -72,7 +77,9 @@ app.use("/api/conversations", conversationsRouter);
 app.use("/api/messages", messagesRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/social-accounts", socialAccountsRouter);
+app.use("/api/content-transfer", contentTransferRouter);
 app.use("/api/media", mediaRouter);
+app.use("/api/organizations", organizationsRouter);
 app.use("/api/analytics", analyticsRouter);
 
 // Central error-handling middleware - route handlers throw HttpError (or let
@@ -107,5 +114,6 @@ httpServer.listen(PORT, () => {
       startInspirationScrapeScheduler();
       startYoutubeScrapeScheduler();
       startNewsletterFetchScheduler();
+      startContentTransferScrapeScheduler();
     });
 });

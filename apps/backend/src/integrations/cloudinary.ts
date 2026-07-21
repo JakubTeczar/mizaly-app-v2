@@ -22,18 +22,15 @@ export interface UploadResult {
 }
 
 // `source` is either a data: URI (e.g. "data:image/png;base64,...", as
-// produced by FileReader.readAsDataURL on the client) or a plain https:// URL
-// - Cloudinary's upload API fetches remote URLs server-side itself, which is
-// also how we re-host Instagram's scraped image URLs (see
-// jobs/inspirationScrapeJob.ts): Instagram's CDN blocks hotlinking from other
-// domains, so serving the original scontent-*.cdninstagram.com URL straight
-// to the browser often 403s. Re-hosting on Cloudinary avoids that and also
-// outlives Instagram's short-lived signed URL expiry.
-export async function uploadMedia(source: string, folder: string): Promise<UploadResult> {
+// produced by FileReader.readAsDataURL on the client, or assembled server-side
+// from a fetched buffer - see lib/contentTransfer.ts) or a plain https:// URL
+// that Cloudinary's upload API fetches remote-side itself.
+export async function uploadMedia(source: string, folder: string, options?: { format?: string }): Promise<UploadResult> {
   configureCloudinary();
   const result = await cloudinary.uploader.upload(source, {
     folder,
     resource_type: "auto",
+    ...(options?.format ? { format: options.format } : {}),
   });
   return { url: result.secure_url, resourceType: result.resource_type };
 }

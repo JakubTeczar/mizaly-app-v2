@@ -4,7 +4,8 @@ import { apiClient, ApiError } from "../../lib/apiClient";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import { TopMetricsStrip } from "./TopMetricsStrip";
 import { SortControl } from "./SortControl";
-import { ClassificationRanking, type ClassifiableItem } from "./ClassificationRanking";
+import { ClassificationRanking, MediaTypeBadge, type ClassifiableItem } from "./ClassificationRanking";
+import { CommentClusters } from "./CommentClusters";
 
 interface InstagramPost {
   id: string;
@@ -57,6 +58,11 @@ function toClassifiableItem(post: InstagramPost): ClassifiableItem {
     outlierRatio: post.outlierRatio,
     isMature: post.isMature,
     thumbnailUrl: post.imageUrl,
+    videoUrl: post.videoUrl,
+    isReel: post.isReel,
+    likesCount: post.likesCount,
+    commentsCount: post.commentsCount,
+    viewsCount: post.videoViewCount,
     title: post.caption || `Post @${post.username}`,
     externalUrl: post.url,
   };
@@ -85,6 +91,15 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("pl-PL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+// How many post cards render at once - each card mounts an <img>/<video>
+// immediately, so rendering all ~200 fetched posts in one go was the actual
+// slow part (not the API call, which already returns the whole sorted list in
+// one response - see engagementNormalization.ts, whose "normalized" sort
+// needs every account's posts at once and can't be paginated in the DB
+// query). Growing this via IntersectionObserver as the user nears the bottom
+// keeps that single response but renders it incrementally.
+const PAGE_SIZE = 10;
+
 const SORT_OPTIONS = [
   { value: "date", label: "Najnowsze" },
   { value: "likes", label: "Najwięcej polubień" },
@@ -109,12 +124,15 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
   const [sortBy, setSortBy] = useState("normalized");
   const [scrapeProgress, setScrapeProgress] = useState<ScrapeProgress | null>(null);
   const wasScrapeRunningRef = useRef(false);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const scrollSentinelRef = useRef<HTMLDivElement | null>(null);
 
   const loadTrends = async (sort: string) => {
     try {
       const res = await apiClient.get<TrendsResponse>(`/api/inspiration/trends?sortBy=${sort}`);
       if (res.status === "ok") {
         setPosts(res.posts ?? []);
+        setVisibleCount(PAGE_SIZE);
         setLastScrapedAt(res.lastScrapedAt ?? null);
       } else {
         setWipMessage(res.message ?? "Ta funkcja jest w budowie.");
@@ -167,12 +185,36 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
         .map((post) => ({
           id: post.id,
           title: post.caption ? post.caption.slice(0, 140) : `@${post.username}`,
-          valueLabel: `${(post.outlierRatio as number).toFixed(1)}x normy @${post.username}`,
+          valueLabel:
+            `${(post.outlierRatio as number).toFixed(1)}x normy @${post.username}` +
+            (post.videoViewCount ? ` · ${formatCount(post.videoViewCount)} wyświetleń` : ""),
           thumbnailUrl: post.imageUrl,
           onClick: () => setLightboxPost(post),
         })),
     [posts]
   );
+
+  const visiblePosts = useMemo(() => posts.slice(0, visibleCount), [posts, visibleCount]);
+
+  // Grows visibleCount once the sentinel (rendered right after the last
+  // visible card) comes within one screen of the viewport - rootMargin fires
+  // the load a bit before the user actually reaches the bottom, so it feels
+  // continuous rather than showing a "reached the end, wait" gap.
+  useEffect(() => {
+    const node = scrollSentinelRef.current;
+    if (!node || visibleCount >= posts.length) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, posts.length));
+        }
+      },
+      { rootMargin: "800px 0px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [posts.length, visibleCount]);
 
   const handleScrapeNow = async () => {
     setIsScraping(true);
@@ -206,6 +248,7 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
 
   return (
     <>
+      <CommentClusters platform="instagram" />
       <ClassificationRanking items={posts.map(toClassifiableItem)} axes={[...CLASSIFICATION_AXES]} />
       <TopMetricsStrip heading="Top 3 - odchylenie od normy konta" items={topPosts} />
 
@@ -235,11 +278,11 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
 
       {!isLoading && !error && posts.length > 0 && (
         <div className="insta-feed">
-          {posts.map((post) => (
+          {visiblePosts.map((post) => (
             <article key={post.id} className="insta-post">
               {post.videoUrl ? (
                 <div className="insta-post-image">
-                  {post.isReel && <span className="insta-post-reel-badge">Reels</span>}
+                  <MediaTypeBadge videoUrl={post.videoUrl} isReel={post.isReel} />
                   <video src={post.videoUrl} poster={post.imageUrl || undefined} controls playsInline preload="metadata" />
                 </div>
               ) : (
@@ -250,6 +293,7 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
                     onClick={() => setLightboxPost(post)}
                     aria-label="Powiększ zdjęcie"
                   >
+                    <MediaTypeBadge videoUrl={post.videoUrl} isReel={post.isReel} />
                     <img src={post.imageUrl} alt={`Post @${post.username}`} loading="lazy" />
                   </button>
                 )
@@ -295,6 +339,15 @@ export function TrendsFeed({ onSaved }: { onSaved: (item: InspirationItem) => vo
             </article>
           ))}
         </div>
+      )}
+
+      {!isLoading && !error && visibleCount < posts.length && (
+        <>
+          <div ref={scrollSentinelRef} aria-hidden="true" />
+          <p className="hint-text" style={{ textAlign: "center", marginTop: 10 }}>
+            Ładowanie kolejnych…
+          </p>
+        </>
       )}
 
       {lightboxPost && (

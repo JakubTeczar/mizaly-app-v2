@@ -56,3 +56,14 @@ export function IconReels({ className }: IconProps) {
     </svg>
   );
 }
+
+export function IconTransfer({ className }: IconProps) {
+  return (
+    <svg {...commonProps} className={className} aria-hidden="true">
+      <path d="M4 8h13" />
+      <path d="M13.5 4.5 17 8l-3.5 3.5" />
+      <path d="M20 16H7" />
+      <path d="M10.5 12.5 7 16l3.5 3.5" />
+    </svg>
+  );
+}

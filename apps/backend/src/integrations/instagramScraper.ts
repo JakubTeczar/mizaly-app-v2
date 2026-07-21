@@ -63,7 +63,18 @@ export interface ScrapedPost {
   url: string;
   type: string;
   caption: string;
+  // Cover/first-candidate image - unchanged legacy field, still used as-is by
+  // jobs/inspirationScrapeJob.ts (the global watchlist pipeline). Populated
+  // even for a video/Reel post (Instagram's own cover), same as always.
   imageUrl: string;
+  // ALL image URLs for an image/carousel post (every slide, not just the
+  // cover) - empty for any video/Reel post, since a video's real opening is
+  // better represented by actual extracted frames (see
+  // lib/mediaAnalysis.ts's analyzeVideoFrames) than Instagram's hand-picked
+  // cover, which the client explicitly does not want kept/shown for videos.
+  // Used by lib/creatorAudit.ts; the legacy global pipeline doesn't read this
+  // field yet (still single-cover only there).
+  imageUrls: string[];
   videoUrl: string | null;
   isReel: boolean;
   likesCount: number;
@@ -71,6 +82,12 @@ export interface ScrapedPost {
   videoViewCount: number | null;
   username: string;
   postedAt: Date | null;
+  // Instagram's internal numeric media id (distinct from the `id`/shortcode
+  // above) - needed to fetch comments reliably (see fetchPostComments).
+  // Grabbed straight from the account-feed scrape since resolving it by
+  // re-scraping the single post page only works for image/carousel posts,
+  // not Reels (see fetch_post_comments.py).
+  mediaId: string | null;
 }
 
 export function isInstagramScraperConfigured(): boolean {
@@ -78,6 +95,7 @@ export function isInstagramScraperConfigured(): boolean {
 }
 
 interface RawScrapedPost {
+  pk?: string | number | null;
   shortcode?: string;
   caption?: { text?: string } | string | null;
   taken_at?: number | null;
@@ -90,6 +108,11 @@ interface RawScrapedPost {
   // apps/instagram-scraper/instagram.py's parse_user_posts, which already
   // extracts this field from the raw API response.
   clips_metadata?: unknown | null;
+  // Present (possibly empty) on every post from this endpoint - non-empty
+  // only for an actual carousel (media_type 8). Each slide already comes
+  // pre-trimmed to just these three fields by instagram.py's jmespath query.
+  carousel_media_count?: number | null;
+  carousel_media?: { media_type?: number | null; image_url?: string | null; video_url?: string | null }[] | null;
 }
 
 function captionText(caption: RawScrapedPost["caption"]): string {
@@ -110,7 +133,14 @@ function runScraper(username: string, postsCount: number): Promise<string> {
         maxBuffer: 20 * 1024 * 1024,
       },
       (error, stdout, stderr) => {
-        if (error) {
+        // run_scrapedo.py always writes a clean {"error": "..."} JSON to
+        // stdout on a caught exception, even when it exits non-zero -
+        // stderr is just diagnostic logging (e.g. the "[INFO] scraping..."
+        // line), not the real reason. Only fall back to stderr if there's
+        // truly no stdout to parse (crashed before writing anything) -
+        // otherwise resolve and let the caller's existing `parsed.error`
+        // check surface the actual, useful message.
+        if (error && !stdout.trim()) {
           reject(new Error(stderr || error.message));
           return;
         }
@@ -118,6 +148,73 @@ function runScraper(username: string, postsCount: number): Promise<string> {
       }
     );
   });
+}
+
+// Scrapes one account's recent posts - shared by scrapeInstagramAccounts
+// below (fixed POSTS_PER_ACCOUNT, for the global watchlist) and
+// lib/creatorAudit.ts (caller-supplied count, for a single audited account -
+// 10 posts for a first look, then 50/200 once the client approves).
+export async function scrapeOneInstagramAccount(username: string, postsCount: number): Promise<ScrapedPost[]> {
+  let stdout: string;
+  try {
+    stdout = await runScraper(username, postsCount);
+  } catch (err) {
+    console.error(`[instagram-scraper] Failed to run scraper for ${username}:`, err);
+    return [];
+  }
+
+  let parsed: { username?: string; posts?: RawScrapedPost[]; error?: string };
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    console.error(`[instagram-scraper] Non-JSON output for ${username}:`, stdout.slice(0, 300));
+    return [];
+  }
+
+  if (parsed.error) {
+    console.error(`[instagram-scraper] Scraper reported an error for ${username}:`, parsed.error);
+    return [];
+  }
+
+  const results: ScrapedPost[] = [];
+  for (const post of parsed.posts ?? []) {
+    if (!post.shortcode) continue;
+    const candidates = post.image_versions2?.candidates ?? [];
+    const videoVersions = post.video_versions ?? [];
+    const isVideo = videoVersions.length > 0;
+    const carousel = post.carousel_media ?? [];
+
+    // No cover for a video post - a video's real opening is the actual
+    // extracted frames (mediaAnalysis.ts's analyzeVideoFrames), not
+    // Instagram's own hand-picked cover image, which can look nothing like
+    // it. Otherwise: every slide's image for a carousel, or just the single
+    // cover for a plain image post.
+    const imageUrls = isVideo
+      ? []
+      : carousel.length > 0
+        ? carousel.map((slide) => slide.image_url).filter((url): url is string => Boolean(url))
+        : candidates[0]?.url
+          ? [candidates[0].url]
+          : [];
+
+    results.push({
+      id: post.shortcode,
+      url: `https://www.instagram.com/p/${post.shortcode}/`,
+      type: isVideo ? "Video" : "Image",
+      caption: captionText(post.caption),
+      imageUrl: candidates[0]?.url ?? "",
+      imageUrls,
+      videoUrl: videoVersions[0]?.url ?? null,
+      isReel: Boolean(post.clips_metadata),
+      likesCount: post.like_count ?? 0,
+      commentsCount: post.comment_count ?? 0,
+      videoViewCount: null,
+      username,
+      postedAt: post.taken_at ? new Date(post.taken_at * 1000) : null,
+      mediaId: post.pk != null ? String(post.pk) : null,
+    });
+  }
+  return results;
 }
 
 // Scrapes each account's recent posts one at a time (rather than one Apify
@@ -132,56 +229,19 @@ export async function scrapeInstagramAccounts(
   for (let i = 0; i < usernames.length; i++) {
     const username = usernames[i];
     onProgress?.(username, i);
-    let stdout: string;
-    try {
-      stdout = await runScraper(username, POSTS_PER_ACCOUNT);
-    } catch (err) {
-      console.error(`[instagram-scraper] Failed to run scraper for ${username}:`, err);
-      continue;
-    }
-
-    let parsed: { username?: string; posts?: RawScrapedPost[]; error?: string };
-    try {
-      parsed = JSON.parse(stdout);
-    } catch {
-      console.error(`[instagram-scraper] Non-JSON output for ${username}:`, stdout.slice(0, 300));
-      continue;
-    }
-
-    if (parsed.error) {
-      console.error(`[instagram-scraper] Scraper reported an error for ${username}:`, parsed.error);
-      continue;
-    }
-
-    for (const post of parsed.posts ?? []) {
-      if (!post.shortcode) continue;
-      const candidates = post.image_versions2?.candidates ?? [];
-      const videoVersions = post.video_versions ?? [];
-      results.push({
-        id: post.shortcode,
-        url: `https://www.instagram.com/p/${post.shortcode}/`,
-        type: videoVersions.length > 0 ? "Video" : "Image",
-        caption: captionText(post.caption),
-        imageUrl: candidates[0]?.url ?? "",
-        videoUrl: videoVersions[0]?.url ?? null,
-        isReel: Boolean(post.clips_metadata),
-        likesCount: post.like_count ?? 0,
-        commentsCount: post.comment_count ?? 0,
-        videoViewCount: null,
-        username,
-        postedAt: post.taken_at ? new Date(post.taken_at * 1000) : null,
-      });
-    }
+    results.push(...(await scrapeOneInstagramAccount(username, POSTS_PER_ACCOUNT)));
   }
 
   return results;
 }
 
-function runCommentsScript(postUrl: string): Promise<string> {
+function runCommentsScript(postUrl: string, mediaId?: string | null): Promise<string> {
   return new Promise((resolve, reject) => {
+    const args = [COMMENTS_ENTRYPOINT, "--url", postUrl];
+    if (mediaId) args.push("--media-id", mediaId);
     execFile(
       PYTHON_BIN,
-      [COMMENTS_ENTRYPOINT, "--url", postUrl],
+      args,
       {
         cwd: SCRAPER_DIR,
         env: process.env,
@@ -189,7 +249,11 @@ function runCommentsScript(postUrl: string): Promise<string> {
         maxBuffer: 20 * 1024 * 1024,
       },
       (error, stdout, stderr) => {
-        if (error) {
+        // Same reasoning as runScraper above - fetch_post_comments.py always
+        // writes a clean {"error": "..."} JSON to stdout on a caught
+        // exception, even on a non-zero exit. stderr is just diagnostic
+        // logging, not the real reason.
+        if (error && !stdout.trim()) {
           reject(new Error(stderr || error.message));
           return;
         }
@@ -199,13 +263,16 @@ function runCommentsScript(postUrl: string): Promise<string> {
   });
 }
 
-// Fetches all comments for one post. Only called by jobs/
-// inspirationScrapeJob.ts for a post the first time it's scraped (see
-// isInstagramCommentFetchEnabled above) - never for an already-known post.
-export async function fetchPostComments(postUrl: string): Promise<ScrapedComment[]> {
+// Fetches all comments for one post. Called by jobs/inspirationScrapeJob.ts
+// for a post the first time it's scraped (see isInstagramCommentFetchEnabled
+// above) - never for an already-known post - and by lib/creatorAudit.ts for
+// every new post. `mediaId` (the account-feed scrape's own `pk`, see
+// ScrapedPost) skips this script's internal media_id resolution, which only
+// works for image/carousel posts, not Reels - pass it whenever you have it.
+export async function fetchPostComments(postUrl: string, mediaId?: string | null): Promise<ScrapedComment[]> {
   let stdout: string;
   try {
-    stdout = await runCommentsScript(postUrl);
+    stdout = await runCommentsScript(postUrl, mediaId);
   } catch (err) {
     console.error(`[instagram-scraper] Failed to fetch comments for ${postUrl}:`, err);
     return [];

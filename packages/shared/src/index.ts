@@ -34,6 +34,12 @@ export interface Organization {
   id: string;
   name: string;
   aiContext: string | null;
+  // Fixed last slide auto-appended to every new carousel this organization
+  // creates (see CarouselSlideEditor.tsx in apps/mobile) - a full slide
+  // (background + text/image layers), designed via the shared canvas editor
+  // (packages/shared/src/carousel/SlideCanvasEditor.tsx) from admin's
+  // ClosingSlideEditor.tsx. Null means no template configured yet.
+  closingSlideTemplate: CarouselSlide | null;
   createdAt: string;
 }
 
@@ -72,7 +78,26 @@ export interface SocialAccount {
   connectedAt: string;
 }
 
-export type CarouselTextFontFamily = "Bebas Neue" | "Gantari" | "Montserrat";
+// One of an organization's own last few Instagram posts, cached for the
+// "Przenoszenie treści z IG" tile (ContentTransferSection.tsx) so it can be
+// cross-posted to other connected platforms without re-scraping on every view.
+export interface ContentTransferPost {
+  id: string;
+  organizationId: string;
+  instagramPostId: string;
+  url: string;
+  caption: string;
+  imageUrl: string | null;
+  videoUrl: string | null;
+  isReel: boolean;
+  postedAt: string | null;
+  scrapedAt: string;
+  // Which platforms this post has already been cross-posted to and when -
+  // written by the publish endpoint right after a successful Zernio publish.
+  transferredTo: Partial<Record<SocialPlatform, string>>;
+}
+
+export type CarouselTextFontFamily = "Bebas Neue" | "Gantari" | "Montserrat" | "Poppins";
 
 export interface CarouselTextLayer {
   id: string;
@@ -86,6 +111,15 @@ export interface CarouselTextLayer {
   align: "left" | "center" | "right";
 }
 
+export interface CarouselImageLayer {
+  id: string;
+  url: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface CarouselSlide {
   order: number;
   backgroundImageUrl?: string;
@@ -93,6 +127,7 @@ export interface CarouselSlide {
   backgroundImageY?: number;
   backgroundImageScale?: number;
   textLayers: CarouselTextLayer[];
+  imageLayers: CarouselImageLayer[];
 }
 
 export interface Post {
@@ -231,6 +266,130 @@ export type ContentFormat = (typeof CONTENT_FORMATS)[number];
 export type ContentHook = (typeof CONTENT_HOOKS)[number];
 export type ContentHookVisual = (typeof CONTENT_HOOKS_VISUAL)[number];
 export type ContentCta = (typeof CONTENT_CTAS)[number];
+
+// Merged hook taxonomy used by lib/creatorAudit.ts's medium-aware hook
+// analysis (hookVideo/hookPost on CreatorAuditPost) - union of CONTENT_HOOKS
+// (verbal/narrative) and CONTENT_HOOKS_VISUAL (what's shown), since a single
+// Reel's or post's hook can be either kind and forcing a verbal-only or
+// visual-only pick loses information. Kept as an explicit list (not derived)
+// so the two source lists can keep evolving independently for the legacy
+// (global Inspiracje) pipeline, which still uses them separately.
+export const CONTENT_HOOKS_UNIFIED = [
+  "pytanie",
+  "szokujące twierdzenie",
+  "liczba/statystyka",
+  "problem na starcie",
+  "osobista historia",
+  "porada/rada",
+  "cliffhanger",
+  "zbliżenie na twarz/emocję",
+  "nietypowy/zaskakujący kadr",
+  "produkt lub jedzenie w centrum kadru",
+  "wizualne przed/po",
+  "dynamiczny ruch/akcja",
+  "tekst/grafika na ekranie jako główny element",
+  "perspektywa POV",
+  "grupa ludzi/dowód społeczny",
+  "inne",
+] as const;
+export type ContentHookUnified = (typeof CONTENT_HOOKS_UNIFIED)[number];
+
+// Where a post's CTA actually appears - "treść główna" (spoken/on-screen, in
+// the Reel/image itself) vs "opis" (the caption, a separate thing read
+// later) vs "oba" (both) - lets you compare which placement performs better,
+// not just whether a CTA exists at all. See lib/contentClassification.ts's
+// classifyCtaWithLocation.
+export const CONTENT_CTA_LOCATIONS = ["treść główna", "opis", "oba", "brak"] as const;
+export type ContentCtaLocation = (typeof CONTENT_CTA_LOCATIONS)[number];
+
+// Admin panel's "Audyt tworcy" tab - one audited Instagram account per
+// organization, fully separate from the global Inspiracje watchlist (see
+// CreatorAuditAccount/CreatorAuditPost in schema.prisma for why).
+export interface CreatorAuditAccount {
+  id: string;
+  organizationId: string;
+  username: string;
+  createdAt: string;
+  lastScrapedAt: string | null;
+}
+
+// The "hooking period" creative-diagnostics signals (see
+// lib/mediaAnalysis.ts) - sound events needs actual audio analysis, not a
+// frame description, and editing cuts were dropped (unreliable from just 3
+// sparse frames sampled across ~2.25s, not a real cut-detection signal).
+// facePresence (is a face visible at all) and shotType (how tight the
+// framing is) are separate questions - a wide gym shot can have a
+// technically-recognizable face without being a close-up.
+export type ShotType = "zbliżenie" | "plan średni" | "plan pełny";
+export type MotionIntensity = "niska" | "średnia" | "wysoka";
+
+export interface CreatorAuditSlideAnalysis {
+  source: string;
+  description: string;
+  extractedText: string;
+  facePresence: boolean;
+  shotType: ShotType;
+  productPresence: boolean;
+  motionIntensity: MotionIntensity;
+  brandAssets: boolean;
+}
+
+export interface CreatorAuditPost {
+  id: string;
+  organizationId: string;
+  username: string;
+  instagramPostId: string;
+  url: string;
+  type: string;
+  caption: string;
+  // Every slide's image for an image/carousel post - empty for a video/Reel
+  // post (no cover kept for videos, see integrations/instagramScraper.ts).
+  imageUrls: string[];
+  videoUrl: string | null;
+  isReel: boolean;
+  likesCount: number;
+  commentsCount: number;
+  videoViewCount: number | null;
+  postedAt: string | null;
+  scrapedAt: string;
+  transcript: { text: string; segments: { start: number; end: number; text: string }[] } | null;
+  // One entry per carousel slide, or one combined entry for a video/Reel's
+  // extracted frames - see lib/creatorAudit.ts.
+  slideAnalysis: CreatorAuditSlideAnalysis[] | null;
+  // Exactly one of hookVideo/hookPost is ever populated per row - which one
+  // depends on whether the post has a videoUrl (Reel) or imageUrls (post/
+  // carousel). Judged from BOTH what's shown and said/written together (see
+  // lib/contentClassification.ts's classifyVideoHook/classifyPostHook), not
+  // as two separate text/visual axes - a hook is one thing per post.
+  hookVideo: string | null;
+  hookVideoDetail: string | null;
+  hookPost: string | null;
+  hookPostDetail: string | null;
+  cta: string | null;
+  ctaDetail: string | null;
+  ctaLocation: string | null;
+  topic: string | null;
+  format: string | null;
+  // Literal quoted fragment justifying the `format` classification (mirrors
+  // ctaDetail) - e.g. the actual "TOP 5 ..." text for a "ranking/listicle"
+  // verdict, not a generic caption blurb repeated from elsewhere.
+  formatDetail: string | null;
+  // Always fetched for every new CreatorAuditPost (unlike the legacy
+  // opt-in ScrapedInstagramComment) - see lib/creatorAudit.ts's
+  // fetchAndStoreComments.
+  comments: CreatorAuditComment[];
+}
+
+export interface CreatorAuditComment {
+  id: string;
+  postId: string;
+  author: string;
+  authorId: string | null;
+  authorVerified: boolean;
+  text: string;
+  likeCount: number;
+  postedAt: string | null;
+}
 
 export interface YoutubeVideoSummary {
   id: string;

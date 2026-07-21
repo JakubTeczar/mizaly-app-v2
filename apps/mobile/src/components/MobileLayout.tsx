@@ -8,11 +8,13 @@ interface TabDef {
   label: string;
   Icon: ComponentType<{ className?: string }>;
   comingSoon?: boolean;
+  /** Funkcja już dostępna, ale wciąż w fazie testów - widoczna jako "Beta", w odróżnieniu od zablokowanego "Wkrótce". */
+  beta?: boolean;
 }
 
 const TABS: TabDef[] = [
   { to: "/inspiracje", label: "Inspiracje", Icon: IconInspiracje },
-  { to: "/tworzenie", label: "Tworzenie", Icon: IconTworzenie },
+  { to: "/tworzenie", label: "Tworzenie", Icon: IconTworzenie, beta: true },
   { to: "/analityke", label: "Analitykę", Icon: IconAnalityke },
   { to: "/wiadomosci", label: "Wiadomości", Icon: IconWiadomosci, comingSoon: FEATURE_FLAGS.wiadomosci },
 ];
@@ -46,6 +48,7 @@ export function MobileLayout() {
               to={tab.to}
               className={({ isActive }) => `bottom-nav-item${isActive ? " active" : ""}`}
             >
+              {tab.beta && <span className="badge-beta badge-beta--tab">Beta</span>}
               <tab.Icon className="bottom-nav-icon" />
               <span className="bottom-nav-label">{tab.label}</span>
             </NavLink>

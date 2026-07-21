@@ -290,6 +290,7 @@ def parse_user_posts(data: Dict) -> Dict:
     result = jmespath.search(
         """{
         id: id,
+        pk: pk,
         shortcode: code,
         caption: caption,
         taken_at: taken_at,
@@ -304,7 +305,13 @@ def parse_user_posts(data: Dict) -> Dict:
         like_count: like_count,
         usertags: usertags,
         clips_metadata: clips_metadata,
-        comments: comments
+        comments: comments,
+        carousel_media_count: carousel_media_count,
+        carousel_media: carousel_media[].{
+            media_type: media_type,
+            image_url: image_versions2.candidates[0].url,
+            video_url: video_versions[0].url
+        }
     }""",
         data,
     )

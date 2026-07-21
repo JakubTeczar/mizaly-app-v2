@@ -5,6 +5,7 @@ import { asyncHandler } from "../lib/asyncHandler";
 import { HttpError } from "../lib/httpError";
 import { requireAuth } from "../middleware/requireAuth";
 import { CONTENT_STATUS_VALUES, SOCIAL_PLATFORM_VALUES } from "../lib/enums";
+import { carouselSlideSchema } from "../lib/carouselSlideSchema";
 import * as zernio from "../integrations/zernio";
 import { ensureZernioProfileId } from "../integrations/zernioProfile";
 import { resolveZernioApiKey } from "../integrations/zernioApiKeys";
@@ -15,30 +16,6 @@ import { renderHtmlToJpeg } from "../media/render";
 const router = Router();
 
 router.use(requireAuth);
-
-// Carousel slides are rendered client-side (react-konva) - the backend just
-// stores the layout JSON (for re-editing) alongside the exported image URLs
-// that actually get published, see mediaUrls above.
-const carouselTextLayerSchema = z.object({
-  id: z.string(),
-  content: z.string(),
-  x: z.number(),
-  y: z.number(),
-  width: z.number(),
-  fontSize: z.number(),
-  fontFamily: z.string(),
-  color: z.string(),
-  align: z.enum(["left", "center", "right"]),
-});
-
-const carouselSlideSchema = z.object({
-  order: z.number(),
-  backgroundImageUrl: z.string().optional(),
-  backgroundImageX: z.number().optional(),
-  backgroundImageY: z.number().optional(),
-  backgroundImageScale: z.number().optional(),
-  textLayers: z.array(carouselTextLayerSchema).default([]),
-});
 
 const createPostSchema = z.object({
   heading: z.string().min(1),
@@ -249,6 +226,10 @@ const publishSchema = z.object({
   // below is just the raw post photo, no branded template.
   storyTemplate: z.enum(["none", "new_post", "series"]).optional(),
   seriesName: z.string().optional(),
+  // Whether to auto-publish an Instagram Story alongside the post - defaults
+  // to true (existing behavior) when omitted, e.g. for the calendar's
+  // "publish now" action which has no UI for this choice yet.
+  addToStory: z.boolean().optional(),
 });
 
 // Sends an already-saved post to Zernio for real - either right away
@@ -258,7 +239,7 @@ const publishSchema = z.object({
 router.post(
   "/:id/publish",
   asyncHandler(async (req, res) => {
-    const { mode, scheduledFor, storyTemplate, seriesName } = publishSchema.parse(req.body);
+    const { mode, scheduledFor, storyTemplate, seriesName, addToStory } = publishSchema.parse(req.body);
     if (mode === "schedule" && !scheduledFor) {
       throw new HttpError(400, "Podaj datę i godzinę planowanej publikacji.");
     }
@@ -329,15 +310,17 @@ router.post(
       });
 
       // Auto-publish the post's photo as an Instagram Story alongside the
-      // feed post - no separate UI for this, it just happens whenever a post
-      // with media targets Instagram. Facebook Stories aren't supported by
-      // Zernio at all, so this is Instagram-only. Best-effort: a story
-      // failure must never fail the (already-succeeded) main post publish.
-      // Default (storyTemplate "none"/omitted) is the raw post photo,
-      // unmodified - the branded template is opt-in, see PostSection.tsx.
+      // feed post, unless the user opted out (see PostSection.tsx checkbox -
+      // addToStory undefined means "not asked", e.g. the calendar's publish
+      // action, so it defaults to true to keep that flow's existing
+      // behavior). Facebook Stories aren't supported by Zernio at all, so
+      // this is Instagram-only. Best-effort: a story failure must never fail
+      // the (already-succeeded) main post publish. Default (storyTemplate
+      // "none"/omitted) is the raw post photo, unmodified - the branded
+      // template is opt-in, see PostSection.tsx.
       let story: { published: boolean; error?: string } | undefined;
       const instagramAccount = accountByPlatform.get("instagram");
-      if (instagramAccount && mediaItems.length > 0) {
+      if (instagramAccount && mediaItems.length > 0 && addToStory !== false) {
         try {
           let storyMediaItem = mediaItems[0];
           if (storyTemplate && storyTemplate !== "none") {

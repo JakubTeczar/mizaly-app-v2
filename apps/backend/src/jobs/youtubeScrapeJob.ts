@@ -29,6 +29,12 @@ import type { ScrapeProgress } from "@mizaly/shared";
 import { prisma } from "../lib/prisma";
 import { fetchVideoDetails, listRecentVideos } from "../integrations/youtube";
 import { classifyUnclassifiedYoutubeVideos } from "../lib/contentClassification";
+import { generateYoutubeContentIdeas } from "../lib/contentIdeas";
+import {
+  generateYoutubeCommentClusters,
+  generateYoutubeQuestionClusters,
+  generateYoutubePainPointClusters,
+} from "../lib/commentClustering";
 
 const SCRAPE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const CHECK_EVERY_MS = 60 * 60 * 1000;
@@ -126,6 +132,30 @@ export async function runYoutubeScrapeJob(): Promise<void> {
       await classifyUnclassifiedYoutubeVideos();
     } catch (err) {
       console.error("[youtube-job] Content classification failed:", err);
+    }
+
+    try {
+      await generateYoutubeContentIdeas();
+    } catch (err) {
+      console.error("[youtube-job] Content idea generation failed:", err);
+    }
+
+    try {
+      await generateYoutubeCommentClusters();
+    } catch (err) {
+      console.error("[youtube-job] Comment clustering failed:", err);
+    }
+
+    try {
+      await generateYoutubeQuestionClusters();
+    } catch (err) {
+      console.error("[youtube-job] Question clustering failed:", err);
+    }
+
+    try {
+      await generateYoutubePainPointClusters();
+    } catch (err) {
+      console.error("[youtube-job] Pain point clustering failed:", err);
     }
   } catch (err) {
     console.error("[youtube-job] Scrape failed:", err);

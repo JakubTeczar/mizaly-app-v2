@@ -21,6 +21,12 @@ import {
 } from "../integrations/instagramScraper";
 import { saveMediaToR2 } from "../lib/r2Store";
 import { classifyUnclassifiedInstagramPosts } from "../lib/contentClassification";
+import { generateInstagramContentIdeas } from "../lib/contentIdeas";
+import {
+  generateInstagramCommentClusters,
+  generateInstagramQuestionClusters,
+  generateInstagramPainPointClusters,
+} from "../lib/commentClustering";
 
 const SCRAPE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const CHECK_EVERY_MS = 60 * 60 * 1000;
@@ -94,6 +100,25 @@ export async function runInspirationScrapeJob(): Promise<void> {
         }
       }
 
+      // Every carousel slide, not just the cover - re-hosted under a distinct
+      // per-slide R2 key (same pattern as lib/creatorAudit.ts's
+      // rehostAndAnalyzeImages) so lib/contentClassification.ts can vision-
+      // analyze each one instead of only the cover image.
+      let imageUrls = existing?.imageUrls ?? [];
+      if (!existing && post.imageUrls.length > 0) {
+        imageUrls = await Promise.all(
+          post.imageUrls.map(async (rawUrl, i) => {
+            try {
+              const path = await saveMediaToR2(rawUrl, `${post.id}-slide${i}`, "jpg");
+              return `${BACKEND_PUBLIC_URL}${path}`;
+            } catch (err) {
+              console.error(`[inspiration-job] Failed to re-host slide ${i} for post ${post.id}:`, err);
+              return rawUrl;
+            }
+          })
+        );
+      }
+
       let videoUrl: string | null = existing?.videoUrl ?? null;
       if (!existing && post.videoUrl) {
         // Reels/feed videos: video_versions links are just as short-lived as
@@ -116,6 +141,7 @@ export async function runInspirationScrapeJob(): Promise<void> {
           type: post.type,
           caption: post.caption,
           imageUrl,
+          imageUrls,
           videoUrl,
           isReel: post.isReel,
           likesCount: post.likesCount,
@@ -130,6 +156,7 @@ export async function runInspirationScrapeJob(): Promise<void> {
           type: post.type,
           caption: post.caption,
           imageUrl,
+          imageUrls,
           videoUrl,
           isReel: post.isReel,
           likesCount: post.likesCount,
@@ -171,6 +198,30 @@ export async function runInspirationScrapeJob(): Promise<void> {
       await classifyUnclassifiedInstagramPosts();
     } catch (err) {
       console.error("[inspiration-job] Content classification failed:", err);
+    }
+
+    try {
+      await generateInstagramContentIdeas();
+    } catch (err) {
+      console.error("[inspiration-job] Content idea generation failed:", err);
+    }
+
+    try {
+      await generateInstagramCommentClusters();
+    } catch (err) {
+      console.error("[inspiration-job] Comment clustering failed:", err);
+    }
+
+    try {
+      await generateInstagramQuestionClusters();
+    } catch (err) {
+      console.error("[inspiration-job] Question clustering failed:", err);
+    }
+
+    try {
+      await generateInstagramPainPointClusters();
+    } catch (err) {
+      console.error("[inspiration-job] Pain point clustering failed:", err);
     }
   } catch (err) {
     console.error("[inspiration-job] Scrape failed:", err);

@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import type { CarouselSlide, Post, SocialAccount, SocialPlatform } from "@mizaly/shared";
+import { SocialPlatform, type CarouselSlide, type Post, type SocialAccount } from "@mizaly/shared";
 import { apiClient, ApiError } from "../../lib/apiClient";
-import { fileToDataUrl, cropToSafeAspectRatio } from "../../lib/imageCrop";
+import { fileToDataUrl } from "@mizaly/shared/src/carousel/imageHelpers";
+import { cropToSafeAspectRatio } from "../../lib/imageCrop";
 import { platformLabel } from "../../lib/platformLabels";
 import { Modal } from "../../components/Modal";
 import { PostPreview } from "./PostPreview";
@@ -143,6 +144,12 @@ export function PostSection() {
   const [storyTemplate, setStoryTemplate] = useState<StoryTemplate>("none");
   const [seriesName, setSeriesName] = useState("");
 
+  // Whether to auto-publish the post's photo as an Instagram Story alongside
+  // the feed post (see backend routes/posts.ts) - defaults to checked since
+  // that's the existing behavior, but the user can opt out per-post. Only
+  // relevant when Instagram is among the selected platforms.
+  const [addToStory, setAddToStory] = useState(true);
+
   // Auto-regenerated (debounced) whenever the template or its inputs change -
   // see the effect below. templatePreviewRequestId guards against an older,
   // slower request overwriting a newer one's result.
@@ -172,9 +179,16 @@ export function PostSection() {
   const connectedPlatforms = Array.from(new Set(connectedAccounts.map((a) => a.platform)));
 
   const togglePlatform = (platform: SocialPlatform) => {
-    setPlatforms((prev) =>
-      prev.includes(platform) ? prev.filter((p) => p !== platform) : [...prev, platform]
-    );
+    setPlatforms((prev) => {
+      const isAdding = !prev.includes(platform);
+      // Re-check "Dodaj do relacji" each time Instagram gets (re-)selected,
+      // since that's the expected default - the user can still uncheck it
+      // afterwards for this post.
+      if (platform === SocialPlatform.INSTAGRAM && isAdding) {
+        setAddToStory(true);
+      }
+      return isAdding ? [...prev, platform] : prev.filter((p) => p !== platform);
+    });
   };
 
   const handlePhotosChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -320,6 +334,7 @@ export function PostSection() {
     setIsScheduleModalOpen(false);
     setStoryTemplate("none");
     setSeriesName("");
+    setAddToStory(true);
     setTemplatePreviewUrl(null);
     setTemplatePreviewError(null);
     resetInterview();
@@ -404,6 +419,7 @@ export function PostSection() {
       const created = await savePost();
       const result = await apiClient.post<PublishResponse>(`/api/posts/${created.id}/publish`, {
         mode: "now",
+        addToStory: platforms.includes(SocialPlatform.INSTAGRAM) ? addToStory : undefined,
         storyTemplate,
         seriesName: storyTemplate === "series" ? seriesName.trim() : undefined,
       });
@@ -431,6 +447,7 @@ export function PostSection() {
       await apiClient.post<PublishResponse>(`/api/posts/${created.id}/publish`, {
         mode: "schedule",
         scheduledFor: new Date(scheduledFor).toISOString(),
+        addToStory: platforms.includes(SocialPlatform.INSTAGRAM) ? addToStory : undefined,
         storyTemplate,
         seriesName: storyTemplate === "series" ? seriesName.trim() : undefined,
       });
@@ -742,6 +759,17 @@ export function PostSection() {
               )}
             </div>
 
+            {platforms.includes(SocialPlatform.INSTAGRAM) && (
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={addToStory}
+                  onChange={(e) => setAddToStory(e.target.checked)}
+                />
+                Dodaj też do relacji na Instagramie
+              </label>
+            )}
+
             {submitError && <p className="error-text">{submitError}</p>}
             {successMessage && <p className="hint-text success">{successMessage}</p>}
             {!canPublish && connectedPlatforms.length > 0 && platforms.length === 0 && (
@@ -782,10 +810,12 @@ export function PostSection() {
           <div className="field-label-row">
             <label htmlFor="storyTemplate">Szablon posta</label>
             <InfoTip text="Dotyczy tylko relacji publikowanej automatycznie na Instagramie razem z postem. Domyślnie to po prostu to samo zdjęcie co w poście, bez żadnej grafiki." />
+            {FEATURE_FLAGS.postSzablonRelacji && <span className="badge-coming-soon">Wkrótce</span>}
           </div>
           <select
             id="storyTemplate"
             value={storyTemplate}
+            disabled={FEATURE_FLAGS.postSzablonRelacji}
             onChange={(e) => {
               setStoryTemplate(e.target.value as StoryTemplate);
               setTemplatePreviewUrl(null);

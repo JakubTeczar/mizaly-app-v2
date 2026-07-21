@@ -343,6 +343,148 @@ label {
   color: #b3261e;
 }
 
+.badge--neutral {
+  background: #eef0f4;
+  color: #3a3f4a;
+}
+
+/* Creator audit dump */
+
+.audit-controls {
+  background: #fff;
+  border-radius: 8px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  max-width: 480px;
+}
+
+/* Left = raw per-post dump, right = final classification/ranking - side by
+   side so it's obvious which raw data produced which conclusion. Stacks on
+   narrow viewports since the admin panel isn't otherwise responsive-tuned. */
+.audit-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1000px) {
+  .audit-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.audit-ranking-panel {
+  max-width: none;
+  position: sticky;
+  top: 20px;
+}
+
+.audit-ranking-panel .sub-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.audit-ranking-panel .sub-tabs button {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.audit-post-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.audit-post-card {
+  display: flex;
+  gap: 18px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.audit-post-card__media {
+  flex-shrink: 0;
+  width: 220px;
+}
+
+.audit-post-card__media img,
+.audit-post-card__media video {
+  width: 100%;
+  border-radius: 6px;
+  display: block;
+}
+
+.audit-post-card__media-empty {
+  width: 100%;
+  aspect-ratio: 1;
+  background: #eef0f4;
+  border-radius: 6px;
+}
+
+.audit-post-card__gallery {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.audit-post-card__gallery img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+
+.audit-slide-analysis {
+  font-size: 13px;
+  padding: 8px 0;
+  border-top: 1px solid #ececf0;
+}
+
+.audit-slide-analysis:first-child {
+  border-top: none;
+}
+
+.audit-slide-analysis__text {
+  color: #666;
+  font-style: italic;
+}
+
+.audit-post-card__fields {
+  flex: 1;
+  min-width: 0;
+}
+
+.audit-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.audit-field {
+  margin-bottom: 10px;
+}
+
+.audit-field__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  margin-bottom: 2px;
+}
+
+.audit-field__value {
+  font-size: 14px;
+  color: #1a1a1a;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .wip-section {
   background: #fff8e6;
   border: 1px dashed #e8c766;
@@ -359,4 +501,98 @@ label {
   margin: 0;
   font-size: 13px;
   color: #6b5a1e;
+}
+
+/* ---------- Carousel slide canvas editor (shared with mobile, see
+   @mizaly/shared/src/carousel/SlideCanvasEditor.tsx) - used by
+   ClosingSlideEditor.tsx. Palette mirrors apps/mobile/src/styles.css's
+   --color-* variables as plain values, since admin doesn't use CSS vars. ---------- */
+
+.carousel-slide-canvas-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f4f5f7;
+}
+
+.carousel-slide-canvas-wrap canvas {
+  border-radius: 10px;
+}
+
+.carousel-text-edit-overlay {
+  position: absolute;
+  resize: none;
+  border: 1.5px dashed #2f5fdd;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 2px;
+  margin: 0;
+}
+
+.carousel-zoom-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  max-width: 420px;
+}
+
+.carousel-zoom-label {
+  color: #666;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.carousel-zoom-control input[type="range"] {
+  flex: 1;
+  width: auto;
+  margin: 0;
+}
+
+.carousel-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.carousel-canvas-toolbar button {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.carousel-canvas-toolbar select {
+  width: auto;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.carousel-color-swatch {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin: 0;
+  border: 1.5px solid #d0d3d9;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.carousel-color-swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+  border-radius: 50%;
+}
+
+.carousel-color-swatch::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+.carousel-color-swatch::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
 }

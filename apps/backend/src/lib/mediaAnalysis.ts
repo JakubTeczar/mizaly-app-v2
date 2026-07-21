@@ -6,7 +6,10 @@
 // builds it: a timestamped transcript for videos (OpenAI Whisper) and an AI
 // description + literal on-image text for images (GPT-4o-mini vision). Both
 // pull the already-R2-hosted media via lib/r2Store.ts - no new fetch/storage
-// layer needed.
+// layer needed. For Reels/videos, the visual hook is judged from actual frames
+// pulled out of the video file itself (via ffmpeg), never Instagram's own
+// cover/thumbnail image - that cover is a separate, hand-picked preview and can
+// look nothing like what the video actually opens on.
 import path from "path";
 import os from "os";
 import crypto from "crypto";
@@ -16,6 +19,7 @@ import fs from "fs/promises";
 import OpenAI from "openai";
 import { toFile } from "openai/uploads";
 import { getMediaObject } from "./r2Store";
+import { withOpenAiRetry } from "./openaiRetry";
 
 const execFileAsync = promisify(execFile);
 
@@ -55,12 +59,12 @@ export async function transcribeVideo(mediaUrl: string, postId: string): Promise
     const buffer = await fetchMediaBuffer(r2Filename(mediaUrl, postId));
     const client = new OpenAI({ apiKey });
     const file = await toFile(buffer, r2Filename(mediaUrl, postId), { type: "video/mp4" });
-    const response = await client.audio.transcriptions.create({
+    const response = await withOpenAiRetry(() => client.audio.transcriptions.create({
       model: "whisper-1",
       file,
       response_format: "verbose_json",
       language: "pl",
-    });
+    }));
 
     const segments = (response.segments ?? []).map((s) => ({
       start: s.start,
@@ -74,19 +78,69 @@ export async function transcribeVideo(mediaUrl: string, postId: string): Promise
   }
 }
 
+// The 7 signal categories a still/frame can meaningfully carry, per the
+// "hooking period" creative-diagnostics framework (on-screen text, face
+// presence, product presence, motion intensity, cuts, brand assets, sound
+// events - see docs/Backlog.md) - everything except sound events, which
+// needs actual audio analysis, not a frame description (transcribeVideo's
+// Whisper transcript is the closest thing we have to an audio signal, kept
+// separate rather than faked here).
+// facePresence and shotType are deliberately separate questions - "is a
+// human face visible at all" vs "how tight is the framing" are independent
+// (a wide gym shot can still have a technically-recognizable face; a close-up
+// can be on a product/hand with no face at all). Standard cinematography
+// shot-type vocabulary, not a vague "close/far" guess.
+export const SHOT_TYPE_VALUES = ["zbliżenie", "plan średni", "plan pełny"] as const;
+export const MOTION_INTENSITY_VALUES = ["niska", "średnia", "wysoka"] as const;
+export type ShotType = (typeof SHOT_TYPE_VALUES)[number];
+export type MotionIntensity = (typeof MOTION_INTENSITY_VALUES)[number];
+
 const VISION_SYSTEM_PROMPT =
   `Opisujesz obraz z posta na Instagramie pod kątem tego, co widz zobaczyłby w pierwszej chwili. Odpowiadaj ` +
-  `WYŁĄCZNIE PO POLSKU. Odpowiedz WYŁĄCZNIE czystym obiektem JSON {"description": "...", "extractedText": "..."} ` +
-  `bez żadnego innego tekstu. "description" to krótki (1-2 zdania), napisany po polsku opis tego, co widać na ` +
-  `obrazie. "extractedText" to DOSŁOWNY tekst zapisany/wyświetlony na obrazie (np. napis, cytat, tytuł slajdu) - ` +
-  `pusty string, jeśli na obrazie nie ma żadnego tekstu (nie tłumacz go, przepisz dokładnie tak jak jest na obrazie).`;
+  `WYŁĄCZNIE PO POLSKU. Odpowiedz WYŁĄCZNIE czystym obiektem JSON {"description": "...", "extractedText": "...", ` +
+  `"facePresence": true/false, "shotType": "...", "productPresence": true/false, "motionIntensity": "...", ` +
+  `"brandAssets": true/false} bez żadnego innego tekstu. "description" to krótki (1-2 zdania) opis tego, co ` +
+  `widać na obrazie. "extractedText" to DOSŁOWNY tekst zapisany/wyświetlony na obrazie (np. napis, cytat, tytuł ` +
+  `slajdu) - pusty string, jeśli na obrazie nie ma żadnego tekstu (nie tłumacz go, przepisz dokładnie tak jak ` +
+  `jest na obrazie). "facePresence" - czy w kadrze w ogóle widać ludzką twarz (obojętnie z jakiej odległości). ` +
+  `"shotType" to JEDNA z: "${SHOT_TYPE_VALUES.join('", "')}" - "zbliżenie" gdy twarz/głowa wypełnia większość ` +
+  `kadru, "plan średni" gdy widać od pasa/klatki piersiowej w górę, "plan pełny" gdy widać całą sylwetkę/postać ` +
+  `(np. całe ćwiczenie na siłowni) - to pytanie o kadrowanie, NIEZALEŻNE od tego czy twarz jest widoczna. ` +
+  `"productPresence" - czy w kadrze widać wyraźnie produkt/sprzęt/miejsce jako główny element. "motionIntensity" ` +
+  `to JEDNA z: "${MOTION_INTENSITY_VALUES.join('", "')}" - czy samo zdjęcie sugeruje ruch/akcję (np. w trakcie ` +
+  `ćwiczenia) czy jest statyczne. "brandAssets" - czy widoczne jest logo, oznaczenie marki/sponsoringu.`;
 
 export interface VisualAnalysis {
   description: string;
   extractedText: string;
+  facePresence: boolean;
+  shotType: ShotType;
+  productPresence: boolean;
+  motionIntensity: MotionIntensity;
+  brandAssets: boolean;
 }
 
-const FALLBACK_VISUAL_ANALYSIS: VisualAnalysis = { description: "", extractedText: "" };
+const FALLBACK_VISUAL_ANALYSIS: VisualAnalysis = {
+  description: "",
+  extractedText: "",
+  facePresence: false,
+  shotType: "plan pełny",
+  productPresence: false,
+  motionIntensity: "niska",
+  brandAssets: false,
+};
+
+function parseVisualAnalysis(parsed: any): VisualAnalysis {
+  return {
+    description: typeof parsed.description === "string" ? parsed.description : "",
+    extractedText: typeof parsed.extractedText === "string" ? parsed.extractedText : "",
+    facePresence: Boolean(parsed.facePresence),
+    shotType: SHOT_TYPE_VALUES.includes(parsed.shotType) ? parsed.shotType : "plan pełny",
+    productPresence: Boolean(parsed.productPresence),
+    motionIntensity: MOTION_INTENSITY_VALUES.includes(parsed.motionIntensity) ? parsed.motionIntensity : "niska",
+    brandAssets: Boolean(parsed.brandAssets),
+  };
+}
 
 // Core vision call, decoupled from "fetch by R2 filename" so it can analyze
 // either a post's actual image (analyzeImage) or a frame extracted from a
@@ -102,30 +156,92 @@ async function analyzeImageBuffer(buffer: Buffer, mimeType: string, postId: stri
     const dataUri = `data:${mimeType};base64,${buffer.toString("base64")}`;
 
     const client = new OpenAI({ apiKey });
-    const completion = await client.chat.completions.create({
+    const completion = await withOpenAiRetry(() => client.chat.completions.create({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: VISION_SYSTEM_PROMPT },
         { role: "user", content: [{ type: "image_url", image_url: { url: dataUri } }] },
       ],
-    });
+    }));
 
     const raw = completion.choices[0]?.message?.content;
     if (!raw) return FALLBACK_VISUAL_ANALYSIS;
 
     try {
-      const parsed = JSON.parse(raw);
-      return {
-        description: typeof parsed.description === "string" ? parsed.description : "",
-        extractedText: typeof parsed.extractedText === "string" ? parsed.extractedText : "",
-      };
+      return parseVisualAnalysis(JSON.parse(raw));
     } catch {
       console.error(`[media-analysis] Model returned non-JSON output for ${postId}, using fallback.`);
       return FALLBACK_VISUAL_ANALYSIS;
     }
   } catch (err) {
     console.error(`[media-analysis] Image analysis failed for ${postId}:`, err);
+    return null;
+  }
+}
+
+// Same idea as VISION_SYSTEM_PROMPT, but for several frames sampled across the
+// opening of a video (see VIDEO_HOOK_FRAME_SECONDS below) instead of one
+// still image - asks for a single combined description of that opening beat,
+// not one description per frame.
+const VISION_MULTI_FRAME_SYSTEM_PROMPT =
+  `Otrzymujesz kilka klatek wyciętych z samego początku Reelsa/wideo na Instagramie, w kolejności czasowej ` +
+  `(pierwsza klatka to sam początek nagrania, kolejne to kolejne sekundy). Opisujesz, co widz zobaczyłby w tym ` +
+  `otwierającym momencie, traktując wszystkie klatki razem jako jeden krótki fragment (np. ruch, zmianę kadru ` +
+  `czy pojawiający się napis między klatkami), a NIE jako osobne obrazy. Odpowiadaj WYŁĄCZNIE PO POLSKU. ` +
+  `Odpowiedz WYŁĄCZNIE czystym obiektem JSON {"description": "...", "extractedText": "...", "facePresence": ` +
+  `true/false, "shotType": "...", "productPresence": true/false, "motionIntensity": "...", "brandAssets": ` +
+  `true/false} bez żadnego innego tekstu. "description" to krótki (1-2 zdania) opis tego, co dzieje się w tym ` +
+  `otwierającym momencie. "extractedText" to DOSŁOWNY tekst zapisany/wyświetlony na którejkolwiek z klatek (np. ` +
+  `napis, cytat) - pusty string, jeśli na żadnej klatce nie ma tekstu (nie tłumacz, przepisz dokładnie tak jak ` +
+  `jest na klatce). "facePresence" - czy w którejkolwiek klatce w ogóle widać ludzką twarz (obojętnie z jakiej ` +
+  `odległości). "shotType" to JEDNA z: "${SHOT_TYPE_VALUES.join('", "')}" - "zbliżenie" gdy twarz/głowa wypełnia ` +
+  `większość kadru, "plan średni" gdy widać od pasa/klatki piersiowej w górę, "plan pełny" gdy widać całą ` +
+  `sylwetkę/postać (np. całe ćwiczenie na siłowni) - to pytanie o kadrowanie, NIEZALEŻNE od tego czy twarz jest ` +
+  `widoczna. "productPresence" - czy w którejkolwiek klatce widać wyraźnie produkt/sprzęt/miejsce jako główny ` +
+  `element. "motionIntensity" to JEDNA z: "${MOTION_INTENSITY_VALUES.join('", "')}" - jak bardzo kadr zmienia ` +
+  `się między klatkami (ruch kamery, ruch osoby/przedmiotu). "brandAssets" - czy widoczne jest logo, oznaczenie ` +
+  `marki/sponsoringu.`;
+
+// Multi-image sibling of analyzeImageBuffer - sends all frames in one vision
+// call so the model judges them as one opening moment instead of several
+// independent stills that would then need to be stitched together after the
+// fact.
+async function analyzeImageBuffers(buffers: Buffer[], mimeType: string, postId: string): Promise<VisualAnalysis | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.warn("[media-analysis] OPENAI_API_KEY missing - skipping image analysis.");
+    return null;
+  }
+
+  try {
+    const client = new OpenAI({ apiKey });
+    const completion = await withOpenAiRetry(() => client.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: VISION_MULTI_FRAME_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: buffers.map((buffer) => ({
+            type: "image_url" as const,
+            image_url: { url: `data:${mimeType};base64,${buffer.toString("base64")}` },
+          })),
+        },
+      ],
+    }));
+
+    const raw = completion.choices[0]?.message?.content;
+    if (!raw) return FALLBACK_VISUAL_ANALYSIS;
+
+    try {
+      return parseVisualAnalysis(JSON.parse(raw));
+    } catch {
+      console.error(`[media-analysis] Model returned non-JSON output for ${postId}, using fallback.`);
+      return FALLBACK_VISUAL_ANALYSIS;
+    }
+  } catch (err) {
+    console.error(`[media-analysis] Multi-frame image analysis failed for ${postId}:`, err);
     return null;
   }
 }
@@ -140,38 +256,49 @@ export async function analyzeImage(mediaUrl: string, postId: string): Promise<Vi
   return analyzeImageBuffer(buffer, mimeTypeFromExtension(mediaUrl), postId);
 }
 
-// Extracts one representative frame from a video buffer via ffmpeg (already
-// installed for Puppeteer/Chromium, see apps/backend/Dockerfile) - needs a
-// real temp file since ffmpeg's seek (-ss) isn't reliable against a piped
-// stream. Tries ~1s in first (avoids a black/transition frame at 0s), falls
-// back to the very first frame once for very short Reels where 1s doesn't
-// exist.
-async function extractVideoFrame(videoBuffer: Buffer): Promise<Buffer> {
+// Sampled at 0.5s/1.5s/2.75s rather than exactly 0/1/2s - avoids landing
+// exactly on a black/transition frame at the very start (the old single-frame
+// code needed a separate 1s->0s fallback for this same reason) and spreads
+// slightly wider across the ~3s "hooking period" that's the critical window
+// for retention (see docs/Backlog.md). Instagram's own cover image (a
+// separate, hand-picked preview) is never used here at all.
+const VIDEO_HOOK_FRAME_SECONDS = [0.5, 1.5, 2.75];
+
+// Extracts frames at VIDEO_HOOK_FRAME_SECONDS from a video buffer via ffmpeg
+// (already installed for Puppeteer/Chromium, see apps/backend/Dockerfile) -
+// needs a real temp file since ffmpeg's seek (-ss) isn't reliable against a
+// piped stream. Very short Reels may not have a frame at every requested
+// second - those seeks are skipped, keeping whichever frames succeeded.
+async function extractVideoFrames(videoBuffer: Buffer): Promise<Buffer[]> {
   const tmpDir = os.tmpdir();
   const id = crypto.randomUUID();
   const inPath = path.join(tmpDir, `${id}-in.mp4`);
-  const outPath = path.join(tmpDir, `${id}-out.jpg`);
 
   try {
     await fs.writeFile(inPath, videoBuffer);
 
     async function tryExtract(seekSeconds: number): Promise<Buffer | null> {
+      const outPath = path.join(tmpDir, `${id}-out-${seekSeconds}.jpg`);
       try {
         await execFileAsync("ffmpeg", ["-y", "-ss", String(seekSeconds), "-i", inPath, "-frames:v", "1", "-f", "image2", outPath]);
         return await fs.readFile(outPath);
       } catch {
         return null;
+      } finally {
+        await fs.unlink(outPath).catch(() => {});
       }
     }
 
-    return (await tryExtract(1)) ?? (await tryExtract(0)) ?? Promise.reject(new Error("ffmpeg produced no frame"));
+    const frames = await Promise.all(VIDEO_HOOK_FRAME_SECONDS.map(tryExtract));
+    const successful = frames.filter((frame): frame is Buffer => frame !== null);
+    if (successful.length === 0) throw new Error("ffmpeg produced no frame");
+    return successful;
   } finally {
     await fs.unlink(inPath).catch(() => {});
-    await fs.unlink(outPath).catch(() => {});
   }
 }
 
-export async function analyzeVideoFrame(mediaUrl: string, postId: string): Promise<VisualAnalysis | null> {
+export async function analyzeVideoFrames(mediaUrl: string, postId: string): Promise<VisualAnalysis | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.warn("[media-analysis] OPENAI_API_KEY missing - skipping frame analysis.");
@@ -180,8 +307,8 @@ export async function analyzeVideoFrame(mediaUrl: string, postId: string): Promi
 
   try {
     const videoBuffer = await fetchMediaBuffer(r2Filename(mediaUrl, postId));
-    const frame = await extractVideoFrame(videoBuffer);
-    return await analyzeImageBuffer(frame, "image/jpeg", postId);
+    const frames = await extractVideoFrames(videoBuffer);
+    return await analyzeImageBuffers(frames, "image/jpeg", postId);
   } catch (err) {
     console.error(`[media-analysis] Frame extraction/analysis failed for ${postId}:`, err);
     return null;

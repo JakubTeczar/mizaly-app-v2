@@ -71,6 +71,64 @@ router.get(
   })
 );
 
+// Latest cached batch of AI-generated content ideas (see
+// lib/contentIdeas.ts), refreshed at the end of each scrape job run. Reads
+// only - the job is what generates and stores these, not this endpoint.
+router.get(
+  "/instagram-content-ideas",
+  asyncHandler(async (_req, res) => {
+    const latest = await prisma.contentIdeaSet.findFirst({
+      where: { source: "instagram" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ ideas: latest?.ideas ?? [], generatedAt: latest?.createdAt.toISOString() ?? null });
+  })
+);
+
+// Latest cached comment segmentation (see lib/commentClustering.ts),
+// refreshed at the end of each scrape job run - same read-only pattern as
+// /instagram-content-ideas above.
+router.get(
+  "/instagram-comment-clusters",
+  asyncHandler(async (_req, res) => {
+    const latest = await prisma.commentClusterSet.findFirst({
+      where: { source: "instagram" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ clusters: latest?.clusters ?? [], generatedAt: latest?.createdAt.toISOString() ?? null });
+  })
+);
+
+// Same as above, scoped to just the "reads as an actual question" subset of
+// comments (see lib/commentClustering.ts's isQuestionComment) - higher-signal
+// than the general topic segmentation when the goal is specifically "what
+// does the audience ask".
+router.get(
+  "/instagram-question-clusters",
+  asyncHandler(async (_req, res) => {
+    const latest = await prisma.commentClusterSet.findFirst({
+      where: { source: "instagram_questions" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ clusters: latest?.clusters ?? [], generatedAt: latest?.createdAt.toISOString() ?? null });
+  })
+);
+
+// Same as above, scoped to the "reads as frustration/struggle" subset of
+// comments (see lib/commentClustering.ts's isPainPointComment) - "what's hard
+// for the audience" as its own lens, independent of the questions view (a
+// comment can match both).
+router.get(
+  "/instagram-pain-point-clusters",
+  asyncHandler(async (_req, res) => {
+    const latest = await prisma.commentClusterSet.findFirst({
+      where: { source: "instagram_pain_points" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ clusters: latest?.clusters ?? [], generatedAt: latest?.createdAt.toISOString() ?? null });
+  })
+);
+
 // Reads the posts collected by the daily scrape job (see
 // src/jobs/inspirationScrapeJob.ts) straight from the DB - no scraper call
 // happens here, so this is always fast.
@@ -179,10 +237,5 @@ router.get(
     });
   })
 );
-
-// Placeholder per docs/ROADMAP.md section 3 - real data source not decided yet.
-router.get("/competitors", (_req, res) => {
-  res.json({ status: "work_in_progress", message: "Ta funkcja jest w budowie." });
-});
 
 export default router;

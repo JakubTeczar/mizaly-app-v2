@@ -27,7 +27,14 @@ def main() -> int:
 
     posts = []
     try:
-        for post in scrape_user_posts(args.username, page_size=args.posts, max_pages=1):
+        # No max_pages cap - Instagram's own API silently limits a single
+        # page to well under what's requested (observed ~33 back for a
+        # page_size=50 request), so getting close to --posts for anything
+        # above that requires paginating across multiple pages via
+        # scrape_user_posts' own `after`-cursor loop. Bounded below by the
+        # `len(posts) >= args.posts` break and by Instagram itself running
+        # out of pages (has_next_page: false) - never unbounded.
+        for post in scrape_user_posts(args.username, page_size=args.posts):
             if args.include_comments:
                 shortcode = post.get("shortcode")
                 comments = []

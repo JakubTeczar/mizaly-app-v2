@@ -6,4 +6,7 @@ export const FEATURE_FLAGS = {
   analitykaOstatniePosty: true,
   postAiDokladne: true,
   postPierwszyKomentarz: true,
+  postSzablonRelacji: true,
+  inspiracjeNewsletter: true,
+  inspiracjePolubienia: true,
 } as const;

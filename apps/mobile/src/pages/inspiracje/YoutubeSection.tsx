@@ -10,6 +10,8 @@ import { apiClient, ApiError } from "../../lib/apiClient";
 import { WatchlistManager } from "./WatchlistManager";
 import { ClassificationRanking, type ClassifiableItem } from "./ClassificationRanking";
 import { TopMetricsStrip } from "./TopMetricsStrip";
+import { CommentClusters } from "./CommentClusters";
+import { YoutubeAccountStatsPanel } from "./YoutubeAccountStatsPanel";
 import { SortControl } from "./SortControl";
 
 function formatCount(value: number): string {
@@ -35,6 +37,11 @@ const SORT_OPTIONS = [
   { value: "comments", label: "Najwięcej komentarzy" },
   { value: "normalized", label: "Odchylenie od normy kanału" },
 ];
+
+// Same rationale/pattern as TrendsFeed.tsx's PAGE_SIZE - renders the video
+// grid incrementally via IntersectionObserver instead of mounting every
+// thumbnail at once.
+const PAGE_SIZE = 10;
 
 const ANALYSIS_ACTIONS: { id: YoutubeAnalysisAction; label: string }[] = [
   { id: "summarize", label: "Streść mi transkrypcję" },
@@ -136,11 +143,14 @@ export function YoutubeSection() {
   const [sortBy, setSortBy] = useState("date");
   const [scrapeProgress, setScrapeProgress] = useState<ScrapeProgress | null>(null);
   const wasScrapeRunningRef = useRef(false);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const scrollSentinelRef = useRef<HTMLDivElement | null>(null);
 
   const loadVideos = async (sort: string) => {
     try {
       const result = await apiClient.get<YoutubeVideoSummary[]>(`/api/youtube-videos?sortBy=${sort}`);
       setVideos(result);
+      setVisibleCount(PAGE_SIZE);
     } catch (err) {
       setVideosError(err instanceof ApiError ? err.message : "Nie udało się pobrać filmów.");
     }
@@ -209,6 +219,26 @@ export function YoutubeSection() {
     [videos]
   );
 
+  const visibleVideos = useMemo(() => videos.slice(0, visibleCount), [videos, visibleCount]);
+
+  // Grows visibleCount once the sentinel comes within one screen of the
+  // viewport - same pattern as TrendsFeed.tsx.
+  useEffect(() => {
+    const node = scrollSentinelRef.current;
+    if (!node || visibleCount >= videos.length) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, videos.length));
+        }
+      },
+      { rootMargin: "800px 0px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [videos.length, visibleCount]);
+
   const handleScrapeNow = async () => {
     setIsScraping(true);
     setScrapeError(null);
@@ -253,7 +283,9 @@ export function YoutubeSection() {
         onAdd={handleAddChannel}
         onRemove={handleRemoveChannel}
       />
+      <YoutubeAccountStatsPanel />
 
+      <CommentClusters platform="youtube" />
       <ClassificationRanking
         items={videos.map(
           (video): ClassifiableItem => ({
@@ -264,6 +296,9 @@ export function YoutubeSection() {
             outlierRatio: video.outlierRatio,
             isMature: video.isMature,
             thumbnailUrl: video.thumbnailUrl,
+            likesCount: video.likeCount,
+            commentsCount: video.commentCount,
+            viewsCount: video.viewCount,
             title: video.title,
             onOpen: () => setSelectedVideoId(video.id),
           })
@@ -299,7 +334,7 @@ export function YoutubeSection() {
         )}
         {videos.length > 0 && (
           <div className="youtube-grid">
-            {videos.map((video) => (
+            {visibleVideos.map((video) => (
               <button
                 key={video.id}
                 type="button"
@@ -326,6 +361,15 @@ export function YoutubeSection() {
               </button>
             ))}
           </div>
+        )}
+
+        {!videosLoading && !videosError && visibleCount < videos.length && (
+          <>
+            <div ref={scrollSentinelRef} aria-hidden="true" />
+            <p className="hint-text" style={{ textAlign: "center", marginTop: 10 }}>
+              Ładowanie kolejnych…
+            </p>
+          </>
         )}
       </section>
     </>

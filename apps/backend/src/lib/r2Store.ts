@@ -30,9 +30,6 @@ const ENDPOINT = process.env.R2_ENDPOINT || (ACCOUNT_ID ? `https://${ACCOUNT_ID}
 
 export const INSPIRATION_MEDIA_ROUTE = "/media/inspiration";
 
-// Flat prefix inside the bucket - this bucket (mizaly-reels-storage) is
-// dedicated to Inspiracje media for now, but the prefix keeps room for
-// other sources later without key collisions.
 const OBJECT_PREFIX = "instagram/";
 
 export function isR2Configured(): boolean {
@@ -79,11 +76,14 @@ function extensionFromContentType(contentType: string | null, fallback: "jpg" | 
 let cachedBucketSizeBytes: number | null = null;
 let cachedBucketSizeAt = 0;
 
-// Real total (sums every object's Size, paginated) - the only reliable source
-// since the bucket already had files in it before this budget existed, so an
-// in-memory counter starting at 0 would undercount. Cached/incremented
-// in-memory between calls (see BUCKET_SIZE_CACHE_MS) so this doesn't run a
-// full listing before every single upload in a scrape run.
+// Real total (sums every object's Size across the whole bucket, paginated,
+// not just one prefix) - the only reliable source since the bucket already
+// had files in it before this budget existed, so an in-memory counter
+// starting at 0 would undercount. No Prefix filter here deliberately: the
+// budget is bucket-wide across every source that shares it (instagram/,
+// content-transfer/, ...), not per-prefix. Cached/incremented in-memory
+// between calls (see BUCKET_SIZE_CACHE_MS) so this doesn't run a full
+// listing before every single upload in a scrape run.
 async function getBucketSizeBytes(): Promise<number> {
   const now = Date.now();
   if (cachedBucketSizeBytes !== null && now - cachedBucketSizeAt < BUCKET_SIZE_CACHE_MS) {
@@ -94,7 +94,7 @@ async function getBucketSizeBytes(): Promise<number> {
   let continuationToken: string | undefined;
   do {
     const page = await getClient().send(
-      new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: OBJECT_PREFIX, ContinuationToken: continuationToken })
+      new ListObjectsV2Command({ Bucket: BUCKET_NAME, ContinuationToken: continuationToken })
     );
     total += (page.Contents ?? []).reduce((sum, obj) => sum + (obj.Size ?? 0), 0);
     continuationToken = page.NextContinuationToken;
@@ -112,7 +112,7 @@ async function getBucketSizeBytes(): Promise<number> {
 // file is over MAX_MEDIA_SIZE_BYTES or would push the bucket over
 // MAX_BUCKET_SIZE_BYTES. `fallbackExt` picks the extension when Instagram
 // doesn't send a usable content-type. Returns the public path to request it
-// back through routes/inspirationMedia.ts, e.g. "/media/inspiration/123.jpg".
+// back through INSPIRATION_MEDIA_ROUTE, e.g. "/media/inspiration/123.jpg".
 export async function saveMediaToR2(remoteUrl: string, id: string, fallbackExt: "jpg" | "mp4"): Promise<string> {
   const res = await fetch(remoteUrl);
   if (!res.ok) {
@@ -157,16 +157,12 @@ export async function saveMediaToR2(remoteUrl: string, id: string, fallbackExt: 
 // saveMediaToR2, e.g. "123.jpg") - used by routes/inspirationMedia.ts since
 // the bucket is private and can't just be linked to directly.
 export function getMediaObject(filename: string) {
-  return getClient().send(
-    new GetObjectCommand({ Bucket: BUCKET_NAME, Key: `${OBJECT_PREFIX}${filename}` })
-  );
+  return getClient().send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: `${OBJECT_PREFIX}${filename}` }));
 }
 
 // Metadata-only (no body) - lets routes/inspirationMedia.ts answer a
 // conditional GET (If-None-Match) with a 304 without pulling the file's
 // bytes through the backend, on top of the browser's own max-age cache.
 export function getMediaObjectMeta(filename: string) {
-  return getClient().send(
-    new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: `${OBJECT_PREFIX}${filename}` })
-  );
+  return getClient().send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: `${OBJECT_PREFIX}${filename}` }));
 }

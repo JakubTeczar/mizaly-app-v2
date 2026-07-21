@@ -24,3 +24,8 @@ apps/backend/storage/
 # Python bytecode cache (apps/instagram-scraper)
 __pycache__/
 *.pyc
+
+# DB dumps - contain live OAuth tokens (SocialAccount) + password hashes, never commit.
+# Scoped to the repo root only (not */prisma/migrations/*/migration.sql, which must stay tracked).
+/*.sql
+/*_dump*.sql

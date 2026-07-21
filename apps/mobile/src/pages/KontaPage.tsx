@@ -9,9 +9,12 @@ interface PlatformsResponse {
   platforms: string[];
 }
 
-// Frontend-only limit for this version: connecting more accounts is planned
-// but not yet ready (billing/Zernio plan limits aren't wired up).
-const MAX_CONNECTED_ACCOUNTS = 2;
+// Zernio itself allows unlimited connected accounts per API key, but only
+// the first 2 are free - each additional one is paid (see the matching
+// ZERNIO_ACCOUNTS_PER_KEY_LIMIT check in apps/backend/src/routes/admin.ts).
+// This client paid for one extra slot, so the ceiling here is 3 (2 free + 1
+// paid) - raise both together if another slot gets paid for.
+const MAX_CONNECTED_ACCOUNTS = 3;
 
 // Platforms Zernio can already connect but that aren't ready to surface yet.
 const COMING_SOON_PLATFORMS = new Set(["x", "pinterest"]);

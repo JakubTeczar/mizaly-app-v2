@@ -4,10 +4,11 @@ import { KalendarzSection } from "./tworzenie/KalendarzSection";
 import { PostSection } from "./tworzenie/PostSection";
 import { StronaSection } from "./tworzenie/StronaSection";
 import { ReelsSection } from "./tworzenie/ReelsSection";
-import { IconKalendarz, IconPost, IconReels, IconStrona } from "./tworzenie/TworzenieIcons";
+import { ContentTransferSection } from "./tworzenie/ContentTransferSection";
+import { IconKalendarz, IconPost, IconReels, IconStrona, IconTransfer } from "./tworzenie/TworzenieIcons";
 import { FEATURE_FLAGS } from "../lib/featureFlags";
 
-type SectionKey = "kalendarz" | "post" | "strona" | "reels";
+type SectionKey = "kalendarz" | "post" | "strona" | "reels" | "przenoszenie";
 
 interface SectionDef {
   key: SectionKey;
@@ -17,6 +18,8 @@ interface SectionDef {
   Component: ComponentType;
   /** Funkcja tymczasowo zablokowana - widoczna w hubie jako "Wkrótce", niedostępna do otwarcia. */
   comingSoon?: boolean;
+  /** Funkcja już dostępna, ale wciąż w fazie testów - widoczna jako "Beta", w odróżnieniu od zablokowanego "Wkrótce". */
+  beta?: boolean;
 }
 
 const SECTIONS: SectionDef[] = [
@@ -33,6 +36,7 @@ const SECTIONS: SectionDef[] = [
     sublabel: "Nowy post z pomocą AI",
     Icon: IconPost,
     Component: PostSection,
+    beta: true,
   },
   {
     key: "strona",
@@ -49,6 +53,13 @@ const SECTIONS: SectionDef[] = [
     Icon: IconReels,
     Component: ReelsSection,
     comingSoon: FEATURE_FLAGS.tworzenieReels,
+  },
+  {
+    key: "przenoszenie",
+    label: "Przenoszenie treści z IG",
+    sublabel: "Roześlij post z Instagrama dalej",
+    Icon: IconTransfer,
+    Component: ContentTransferSection,
   },
 ];
 
@@ -93,6 +104,7 @@ export function TworzeniePage() {
             disabled={section.comingSoon}
           >
             {section.comingSoon && <span className="badge-coming-soon badge-coming-soon--corner">Wkrótce</span>}
+            {section.beta && <span className="badge-beta badge-beta--corner">Beta</span>}
             <section.Icon className="tworzenie-tile-icon" />
             <span className="tworzenie-tile-label">{section.label}</span>
             <span className="tworzenie-tile-sub">{section.sublabel}</span>

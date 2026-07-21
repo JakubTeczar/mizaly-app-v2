@@ -593,6 +593,24 @@ a {
   padding: 4px 14px 14px;
 }
 
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--color-text);
+  cursor: pointer;
+  margin: 10px 0;
+}
+
+.checkbox-field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 /* ---------- Field label + tap-to-reveal info hint ---------- */
 
 .field-label-row {
@@ -696,6 +714,41 @@ a {
 }
 
 .badge-coming-soon--tab {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  font-size: 8px;
+  padding: 2px 6px;
+}
+
+/* Distinct from badge-coming-soon: this marks a feature that's live and
+   usable, just still being tested/refined - never applied to a disabled
+   tile/tab (that's what badge-coming-soon is for), so it gets its own color
+   rather than reusing --color-primary and risking "looks locked" confusion. */
+.badge-beta {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  background: #f97316;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.badge-beta--corner {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 8px;
+  padding: 2px 6px;
+}
+
+.badge-beta--tab {
   position: absolute;
   top: -8px;
   right: -6px;
@@ -1287,18 +1340,22 @@ a {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  border: none;
-  background: rgba(0, 0, 0, 0.45);
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  background: rgba(0, 0, 0, 0.65);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
   color: #fff;
-  font-size: 18px;
-  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.preview-carousel-arrow svg {
+  width: 16px;
+  height: 16px;
 }
 
 .preview-carousel-arrow:disabled {
@@ -1632,42 +1689,103 @@ a {
   padding: 2px 0 14px;
 }
 
-.stat-row-detail-item {
+/* ---------- Comment cluster segmentation detail (CommentClusters.tsx) ---------- */
+
+.comment-cluster-list {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
+  flex-direction: column;
+  gap: 0;
+}
+
+.comment-cluster-item {
+  padding: 10px 2px;
+  border-top: 1px solid var(--color-border);
+  font-size: 13px;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.comment-cluster-item:first-child {
+  border-top: none;
+}
+
+.comment-cluster-more {
+  padding: 10px 2px 0;
+  font-size: 12px;
+}
+
+.comment-cluster-source-link {
+  font-size: 12px;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.group-item-carousel {
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: 12px;
+  overflow: hidden;
 }
 
-.stat-row-detail-link {
-  text-decoration: none;
-  color: inherit;
-  cursor: pointer;
+.group-item-carousel-viewport {
+  position: relative;
+  width: 100%;
+  touch-action: pan-y;
+  background: var(--color-bg);
 }
 
-.stat-row-detail-thumb {
-  width: 52px;
-  height: 52px;
-  border-radius: 8px;
+.group-item-carousel-media {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  min-height: 160px;
   object-fit: cover;
-  flex-shrink: 0;
   background: var(--color-border);
 }
 
-.stat-row-detail-text {
-  flex: 1;
-  min-width: 0;
+.group-item-carousel-media--empty {
+  height: 160px;
+}
+
+.group-item-carousel-media-btn {
+  display: block;
+  width: 100%;
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.group-item-carousel-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px 12px;
   font-size: 13px;
   line-height: 1.4;
   color: var(--color-text);
 }
 
-.stat-row-detail-meta {
+.group-item-carousel-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.group-item-carousel-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   font-size: 12px;
   color: var(--color-text-muted);
-  margin-top: 2px;
+}
+
+.group-item-carousel-link {
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
 }
 
 /* ---------- Modal ---------- */
@@ -1777,6 +1895,9 @@ a {
   top: 10px;
   left: 10px;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 3px 9px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.6);
@@ -1784,6 +1905,12 @@ a {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.insta-post-reel-badge svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
 
 .insta-post-body {
@@ -2269,4 +2396,130 @@ a {
 .newsletter-body img {
   max-width: 100%;
   height: auto;
+}
+
+/* ---------- Przenoszenie treści z IG ---------- */
+
+.content-transfer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.content-transfer-post {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-bottom-width: 1px;
+  border-radius: 12px;
+  transition: border-color 0.15s, border-bottom-width 0.15s;
+}
+
+/* Sent to every connected target platform - full border (not a side stripe)
+   with a deliberately heavier bottom edge, so it reads as "done, nothing
+   left to do here" at a glance. The check badge sits ON the top-right
+   corner, built into the frame rather than a separate line of body text. */
+.content-transfer-post--complete {
+  border-color: var(--color-primary-tint);
+  border-bottom: 4px solid var(--color-primary);
+}
+
+.content-transfer-post-check {
+  position: absolute;
+  /* Mostly INSIDE the card (not poking far above it) - the earlier attempt
+     to fix crowding by spacing the list out further didn't help, because the
+     actual crowding was this badge's own offset relative to its own card,
+     not the gap between cards. */
+  top: 4px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  border: 2px solid var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.content-transfer-post-check svg {
+  width: 12px;
+  height: 12px;
+  stroke: #fff;
+}
+
+.content-transfer-post-media {
+  flex-shrink: 0;
+  width: 84px;
+  height: 105px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-surface-alt, #f2f2f2);
+}
+
+.content-transfer-post-media img,
+.content-transfer-post-media video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.content-transfer-post-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.content-transfer-post-caption {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.content-transfer-post-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.content-transfer-platform-action {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.content-transfer-send-all {
+  font-weight: 700;
+  color: var(--color-primary);
+  width: 100%;
+  text-align: left;
+}
+
+.content-transfer-platform-action .card-muted-text {
+  font-size: 12px;
+}
+
+.content-transfer-modal-media {
+  width: 100%;
+  max-height: 320px;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 14px;
+  background: var(--color-surface-alt, #f2f2f2);
+}
+
+.content-transfer-modal-media img,
+.content-transfer-modal-media video {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
 }

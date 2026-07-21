@@ -75,8 +75,21 @@ Zaimplementowane:
 - Naprawione: dodana `normalizeToJpeg()` w `apps/mobile/src/lib/imageCrop.ts` (dekoduje przez `<img>`, re-enkoduje do JPEG przez canvas, bez przycinania — przycięcie do kwadratu robi już `SlideBackgroundImage` przez Konva `crop`), wywoływana w `handleBackgroundChange` przed uploadem — niezdekodowalny plik teraz rzuca błąd widoczny w UI od razu, przy uploadzie, a nie później. `SlideBackgroundImage` odczytuje teraz `status` i przez nowy prop `onLoadError`/`onBackgroundError` zgłasza błąd do `SlideRowCard`, który wyświetla go w istniejącym `error-text`.
 - Typecheck mobile przechodzi. **Nie zweryfikowane end-to-end w przeglądarce z prawdziwym plikiem HEIC** (brak takiego pliku pod ręką w tej sesji) — do potwierdzenia przy najbliższej okazji z realnym zdjęciem z telefonu.
 
+**Naprawa HEIC (2026-07-19)**: powyższa naprawa tylko ujawniała błąd wcześniej, nie usuwała przyczyny - HEIC/HEIF z iPhone'a nie da się zdekodować przez `<img>`/canvas w żadnej przeglądarce poza Safari, więc realne zdjęcia z telefonu wciąż odrzucało. Dodany `heic2any` (dekoder WASM, dociągany dynamicznym importem tylko gdy plik faktycznie jest HEIC/HEIF, żeby nie obciążać wszystkich bundlem ~340KB gzip) w `fileToDataUrl` (`apps/mobile/src/lib/imageCrop.ts`) - konwertuje do JPEG zanim dojdzie do `cropToSafeAspectRatio`/`normalizeToJpeg`. Naprawia to zarówno zdjęcia tła karuzeli, jak i zwykłe zdjęcia posta (`PostSection.handlePhotosChange`), bo oba wołają `fileToDataUrl`. Typecheck + `vite build` przechodzą. **Nie zweryfikowane end-to-end w przeglądarce z prawdziwym plikiem HEIC.**
+
+**Dodane wstawki zdjęciowe (2026-07-19)**: nowy typ warstwy, `CarouselImageLayer` (`packages/shared/src/index.ts`) - `id/url/x/y/width/height`, obok istniejących `textLayers`. Dodane pole `imageLayers: CarouselImageLayer[]` do `CarouselSlide` (backend: `carouselImageLayerSchema` w `routes/posts.ts`). W `CarouselSlideEditor.tsx`: przycisk "+ Dodaj zdjęcie" w toolbarze kanwy (obok "+ Dodaj tekst"), upload przez ten sam `fileToDataUrl` co tło (więc też obsługuje HEIC), ale bez `normalizeToJpeg` - nowa `readImageDimensions()` w `imageCrop.ts` tylko dekoduje i zwraca wymiary, zachowując oryginalny format/przezroczystość (ważne dla wyciętych zdjęć produktowych na przezroczystym tle, tak jak w przykładzie od użytkownika - białe pudełko ze zdjęciem produktu, nie zdjęcie na całe tło). Domyślny rozmiar 420px szerokości z zachowaniem proporcji, wyśrodkowany. Selekcja/Transformer uogólnione do obsługi obu typów warstw (tekst i zdjęcie) przez wspólny `selectedId` i dwie mapy refów. Przycisk tła przemianowany na "Dodaj/Zmień zdjęcie tła" dla odróżnienia od nowego przycisku. Typecheck + `vite build` (mobile/backend/admin) przechodzą.
+
+**Dodany slajd zamykający karuzeli per organizacja (2026-07-19)**: admin może teraz skonfigurować per organizacja (klient) stały ostatni slajd karuzeli - zdjęcie tła + dwa teksty (góra/dół) - automatycznie dodawany do każdej **nowej** karuzeli, usuwalny jak każdy inny slajd (przycisk „×”), oba teksty zostają zwykłymi, edytowalnymi warstwami tekstu w edytorze.
+- Prisma: `Organization.closingSlideBackgroundUrl/closingSlideTopText/closingSlideBottomText` (migracja `20260719125257_add_organization_closing_slide_template`).
+- Admin (`OrganizationsPage.tsx`): nowy przycisk „Slajd zamykający” obok „Kontekst AI” - modal z uploadem zdjęcia (`POST /api/admin/organizations/:id/closing-slide-background`, wymusza `format: "jpg"` przez Cloudinary, żeby wynikowy URL zawsze dał się zdekodować w przeglądarce niezależnie od tego, co admin wgra, np. HEIC) i dwoma polami tekstowymi (zapis przez rozszerzony `PATCH /api/admin/organizations/:id`).
+- Nowy endpoint `GET /api/organizations/me` (`routes/organizations.ts`, zwykła auth usera, nie admina) - jedyny sposób, w jaki mobile czyta cokolwiek o własnej organizacji; na razie zwraca tylko pola slajdu zamykającego.
+- Mobile (`CarouselSlideEditor.tsx`): przy **całkiem nowej** karuzeli (`initialSlides.length === 0`, sprawdzane raz przy montowaniu) dociąga szablon i dokleja go jako slajd na końcu (`createClosingSlide`). „+ Dodaj slajd” wstawia nowe slajdy PRZED przypięty slajd zamykający (nie na koniec), dopóki użytkownik go nie usunie - śledzone przez `closingSlideRowIdRef`, nie przez pole w modelu danych. Ponowna edycja zapisanej karuzeli nigdy nie dociąga/wstrzykuje go ponownie (byłby to już zwykły slajd w `initialSlides`).
+- Typecheck + `vite build`/`tsc` (mobile/backend/admin) przechodzą. **Nie zweryfikowane end-to-end w przeglądarce** (upload w adminie, automatyczne dodanie w nowej karuzeli, kolejność po dodaniu kolejnych slajdów, usunięcie i przywrócenie zwykłego zachowania „+ Dodaj slajd”).
+
 Wciąż otwarte:
-- [ ] Zweryfikować naprawę z prawdziwym zdjęciem z telefonu (najlepiej HEIC z iPhone'a) — potwierdzić, że błąd teraz pojawia się od razu przy uploadzie z jasnym komunikatem, a nie cichnie.
+- [ ] Zweryfikować naprawę HEIC z prawdziwym zdjęciem z iPhone'a (upload tła karuzeli i zwykłego zdjęcia posta) - potwierdzić, że się wgrywa i wyświetla poprawnie.
+- [ ] Zweryfikować nową funkcję wstawek zdjęciowych end-to-end w przeglądarce (dodanie, przeciąganie, resize, usuwanie, eksport slajdu z wstawką).
+- [ ] Zweryfikować slajd zamykający end-to-end (upload w adminie, nowa karuzela w mobile, dodawanie/usuwanie slajdów, zapis i ponowna edycja).
 - [ ] Sprawdzić upload w kontekście dotyku (mobile), nie tylko myszką/desktopem — `input[type=file]` na realnym telefonie może się zachowywać inaczej.
 - [ ] Dociągnąć testy drag/resize tekstu przez Playwright (przerwane w trakcie tej sesji przez timeout logowania przy kolejnym uruchomieniu skryptu, nieprzebadane do końca) — funkcjonalnie kod wygląda poprawnie (ten sam wzorzec co w naprawionym buggu wyżej), ale warto potwierdzić automatycznie, nie tylko wizualnie.
 
@@ -164,3 +177,104 @@ User chce kontynuować (2026-07-16) z innego urządzenia niż to, na którym pow
 - [ ] Reszta otwartych spraw z tej sesji: patrz punkt 2 (bug z uploadem zdjęcia do karuzeli, do odtworzenia) i punkt 6 (dane analityki + UX przycisku pobierania, do doprecyzowania z userem) wyżej w tym pliku.
 
 Kontekst: zgłoszone en passant na sam koniec sesji poświęconej głównie edytorowi karuzeli (punkt 2), user świadomie odłożył temat na następną sesję ("dobra, na tyle, dzięki") — nie doprecyzowywane na żywo, stąd otwarte pytania wyżej.
+
+## 8. Inspiracje: sekcja "Pomysły na content" (dopięcie migracji + weryfikacja)
+
+Zgłoszone przez usera (2026-07-17): w Inspiracjach jest już "obserwowane konta", "ile treści pobrano z konta" i "co działa najlepiej" (top 3 + ranking klasyfikacji), ale brakuje ostatniego ogniwa — przełożenia tych danych na konkretne, gotowe do nagrania pomysły na content dla klienta (np. "nagraj X w formacie Y, bo Z działa najlepiej"), zamiast zostawiać mu samodzielne wyciąganie wniosków z rankingów.
+
+Ustalenia z planowania: generowanie w tle (doklejone do istniejącego joba scrapującego, nie on-demand), 10 pomysłów domyślnie, dla obu źródeł (Instagram + YouTube), sekcja domyślnie rozwinięta, umieszczona między `ClassificationRanking` ("Co działa najlepiej") a `TopMetricsStrip` ("Top 3") w obecnej kolejności DOM.
+
+**Zaimplementowane i zweryfikowane end-to-end (2026-07-17):**
+- Nowy model `ContentIdeaSet` w `apps/backend/prisma/schema.prisma` (global, wzorem `InspirationAnalysis` — "create-only, czytaj najnowszy wiersz per source", pole `ideas Json`) — migracja `20260717182547_add_content_idea_set` zaaplikowana.
+- Nowy `apps/backend/src/lib/contentIdeas.ts` — `generateInstagramContentIdeas()`/`generateYoutubeContentIdeas()`: liczy `outlierRatio` przez `computeNormalizedScores`, grupuje wg osi klasyfikacji (port `rankBy()` z `ClassificationRanking.tsx` na backend), bierze top 5 grup + top 3 posty/wideo, woła gpt-4o-mini (`response_format: json_object`) o dokładnie 10 pomysłów `{title, rationale}`, zapisuje przez `prisma.contentIdeaSet.create`.
+- Podpięte w `apps/backend/src/jobs/inspirationScrapeJob.ts` i `jobs/youtubeScrapeJob.ts`, zaraz po odpowiednim `classifyUnclassified*()`, w osobnym try/catch (błąd generowania pomysłów nie wywraca całego joba).
+- Nowe endpointy odczytu: `GET /api/inspiration/instagram-content-ideas` (`routes/inspiration.ts`) i `GET /api/youtube-videos/content-ideas` (`routes/youtubeVideos.ts`, zarejestrowany **przed** `GET /:id`, żeby nie kolidować z parametrem).
+- Nowy frontend `apps/mobile/src/pages/inspiracje/ContentIdeasPanel.tsx` (fetch on mount, lista `.stat-rows`, stan pusty/błąd/ładowanie wg istniejącej konwencji sekcji) — wpięty w `TrendsFeed.tsx` (Instagram) i `YoutubeSection.tsx` (YouTube), między `ClassificationRanking` a `TopMetricsStrip`.
+
+**Weryfikacja wykonana (2026-07-17):** typecheck backend+mobile czysty; generator uruchomiony bezpośrednio na już zescrapowanych/sklasyfikowanych danych (11 kont IG, 4 kanały YT) — zapisał 10 pozycji `{title, rationale}` po polsku dla obu źródeł, bez "—"; oba endpointy zwracają poprawny kształt (pusty przed generacją, wypełniony po); UI zweryfikowane w przeglądarce (Playwright) — na obu zakładkach nagłówki sekcji w kolejności: "...Co działa najlepiej" → "Pomysły na content" → "Top 3 - odchylenie od normy konta/kanału", zero błędów w konsoli.
+
+Zostało:
+- [ ] **Commit zmian** — kod nie jest jeszcze scommitowany.
+- [ ] Prawdziwy przebieg przez pełny "Pobierz teraz" (scrape-now) na świeżych danych, nie tylko bezpośrednie wywołanie generatora na już istniejących postach — żeby potwierdzić też samo podpięcie w `inspirationScrapeJob.ts`/`youtubeScrapeJob.ts` (logika generatora już zweryfikowana, samo wywołanie z joba jeszcze nie przeszło realnego scrape'a).
+
+Pełny plan (kontekst, uzasadnienie decyzji, dokładne linie do zmiany) zapisany w `C:\Users\kubat\.claude\plans\rippling-marinating-minsky.md`.
+
+## 9. Inspiracje: hook wizualny (wielo-klatkowy) zrobiony, hook tekstowy (za wąski zakres) — nie
+
+Zgłoszone/zrobione w tej sesji (2026-07-17), kontynuacja punktu 8 wyżej (ta sama sesja/dzień):
+
+**Zaimplementowane:**
+- Hook wizualny dla Reelsów/wideo: zamiast jednej klatki (dawniej `extractVideoFrame`, seek 1s → fallback 0s) teraz wyciągane są 3 klatki (0s, 1s, 2s) przez ffmpeg (`extractVideoFrames` w `apps/backend/src/lib/mediaAnalysis.ts`) i analizowane razem jednym zapytaniem vision (`analyzeImageBuffers`, nowy prompt `VISION_MULTI_FRAME_SYSTEM_PROMPT`) zamiast osobno per klatkę. Podpięte w `contentClassification.ts` jako `analyzeVideoFrames`.
+- Post/zdjęcie (w tym karuzela): bez zmian — nadal tylko pierwsze/okładkowe zdjęcie (`analyzeImage`), bo scraper (`instagramScraper.ts` + `instagram.py`) w ogóle nie pobiera dalszych slajdów karuzeli, tylko okładkę.
+- Dodany mały znacznik graficzny typu posta (`MediaTypeBadge` w `ClassificationRanking.tsx`, użyty też w `TrendsFeed.tsx`) — ikonka + etykieta "Zdjęcie" / "Wideo" / "Reels" nad miniaturą; wcześniej badge "Reels" pokazywał się tylko dla Reelsów, zwykłe zdjęcia/wideo nie miały żadnego oznaczenia.
+- Przy okazji: paginacja/dociąganie kart w "Trendujące treści" (`TrendsFeed.tsx`) — renderuje 10 postów na start (`PAGE_SIZE`), dogrywa kolejne 10 przez `IntersectionObserver`, gdy user zbliży się do końca listy (dane i tak przychodzą jednym requestem, bo sortowanie "normalized" liczy `outlierRatio` na całym zbiorze kont naraz — patrz `engagementNormalization.ts`).
+- Usunięta karta-placeholder "Analiza konkurencji" (`WipCard` w `InstagramSection.tsx` + stub `GET /api/inspiration/competitors` w `inspiration.ts`) — była to funkcja WIP bez ustalonego źródła danych (patrz `docs/ROADMAP.md`), a manualne dodawanie inspiracji już istnieje na dole strony (`InspiracjePage.tsx`, sekcja "Dodaj inspirację ręcznie"), więc nic nie trzeba było dobudowywać. **Uwaga**: `docs/ROADMAP.md` (linie ok. 47, 69, 102, 113, 143) wciąż opisuje "analizę konkurencji" jako planowany placeholder WIP — nieaktualne, do zaktualizowania jeśli user potwierdzi, że funkcja faktycznie odpada.
+
+Checklist do zrobienia:
+- [ ] **Hook tekstowy — user zgłosił, że okno/zakres tekstu jest za wąski** ("trzeba było dodać szeroką, w sensie większy zakres tekstowego hooka") — **nie zaimplementowane w tej sesji**. Dziś: `HOOK_WINDOW_SECONDS = 5` w `contentClassification.ts` ogranicza `hookSourceFromTranscript` do pierwszych 5 sekund transkryptu wideo (z fallbackiem na cały tekst, jeśli nic nie mieści się w oknie); dla postów-zdjęć `hookTextSource` to tylko `visualText` (tekst wyciągnięty z obrazka), bez podpisu/caption. Do ustalenia z userem: czy chodzi o zwiększenie `HOOK_WINDOW_SECONDS` (np. do 10-15s), o dorzucenie captionu jako dodatkowego kontekstu, czy o coś innego — zapisane możliwie dosłownie, żeby nie zgadywać intencji.
+- [ ] **Nie zweryfikowane end-to-end** — zmiany w hooku wizualnym (3 klatki) przechodzą typecheck, ale nie zostały odpalone na żywym Reelsie (backend nie był uruchomiony w tej sesji z tej strony — user zwolnił port 4000, żeby odpalić go ręcznie samodzielnie). Do potwierdzenia: że ffmpeg faktycznie wyciąga 3 różne klatki, że multi-image vision call działa i zwraca sensowny opis po polsku, bez "—".
+- [ ] **Niedokończona/przerwana wiadomość o kolorze i odstępie w UI** — user zaczął pisać "nie używaj żółtego [...] koloru i budża daj troszkę u góry, żeby ten tekst był na całej szerokości", ale wiadomość została przerwana i nigdy nie doprecyzowana ani powtórzona w tej sesji. Nie wiadomo, którego elementu dotyczyło (jakiś żółty element + odstęp/margines u góry + tekst ma zająć pełną szerokość) — do wyjaśnienia z userem, zanim ktokolwiek zgaduje o co chodziło.
+- [ ] Karuzele wciąż nie są w ogóle scrapowane wieloslajdowo (tylko okładka) — jeśli docelowo hook wizualny/tekstowy ma uwzględniać całą karuzelę, to osobny, większy temat (scraper Pythonowy `instagram.py`'s `parse_user_posts` nie zbiera `carousel_media`, plus zmiany w `instagramScraper.ts`, Prisma, froncie) — nieporuszone dziś, tylko odnotowane przy okazji.
+
+Kontekst: user kończył pracę na dziś, poprosił o zapisanie otwartych wątków w backlogu zamiast dalszej implementacji.
+
+## 10. Karuzela Reels w Inspiracjach (strzałki) + toggle relacji na Instagramie + szablon posta jako "wkrótce"
+
+Zgłoszone/zrobione w tej sesji (2026-07-17), kontynuacja punktu 9 wyżej (ta sama sesja/dzień). Sesja przerwana w połowie na prośbę usera, bo kończyły mu się dzienne tokeny — poniżej dokładny stan.
+
+**Zaimplementowane i zweryfikowane (build + Playwright):**
+- User zgłosił, że strzałki nawigacji w nowej karuzeli Reelsów (`GroupItemCarousel` w `ClassificationRanking.tsx`, z punktu 9) "rozjechały się" — zmierzone przez `getBoundingClientRect()`: same przyciski były już piksel-w-piksel symetryczne, prawdziwą przyczyną były znaki tekstowe "‹"/"›" renderujące się z innym optycznym środkiem zależnie od fontu/OS. Naprawione przez nowy `apps/mobile/src/components/ChevronIcon.tsx` (ikona SVG ze ścieżką, zamiast glifu tekstowego), użyty zarówno w `ClassificationRanking.tsx` jak i w oryginalnej karuzeli `PostPreview.tsx` (ten sam CSS, ta sama potencjalna wada). Zweryfikowane buildem + świeżym skryptem Playwright (pomiar pozycji obu strzałek + zrzut ekranu).
+
+**Zaimplementowane, NIEZWERYFIKOWANE buildem/przeglądarką (przerwane przez limit tokenów):**
+- User: "dodaj przełącznik/czek, kiedy daje się relację... teraz się automatycznie dodaje, nawet się nie pytasz. Możesz dać automatycznie zaznaczone, że jak klikniesz platformę Instagram, to automatycznie jest zaznaczone dodanie się relacji, ale daj możliwość wyłączenia tego." — kontekst: `apps/backend/src/routes/posts.ts` (endpoint `/:id/publish`) zawsze auto-publikował relację (Instagram Story) obok posta, jeśli konto Instagram było podłączone i post miał media, bez żadnego pytania usera.
+  - Nowy stan `addToStory` (domyślnie `true`) w `PostSection.tsx`, checkbox "Dodaj też do relacji na Instagramie" widoczny tylko gdy `platforms.includes("instagram")`, nowa klasa `.checkbox-field` w `styles.css`.
+  - `togglePlatform` ustawia `addToStory` z powrotem na `true` za każdym razem, gdy Instagram zostaje (ponownie) zaznaczony — zgodnie z "automatycznie zaznaczone przy kliknięciu Instagrama".
+  - Wysyłane do backendu jako `addToStory` w obu wywołaniach `/publish` (teraz i zaplanuj), tylko gdy Instagram jest wśród wybranych platform (inaczej `undefined`).
+  - Backend: `publishSchema` ma nowe opcjonalne pole `addToStory: z.boolean().optional()`; auto-story pomijane, gdy `addToStory === false`. Domyślne zachowanie (pole pominięte/`undefined`) zostaje **bez zmian** (`true`) celowo — `KalendarzSection.tsx`'s "publikuj teraz" z kalendarza wywołuje ten sam endpoint bez żadnego UI do tego wyboru, więc nie powinno się jej zachowanie ciche zmienić.
+- User: "daj szablon posta jako wkrótce funkcjonalność" — dotyczy pola "Szablon posta" (`storyTemplate` select: Brak/Nowy post/Seria w `PostSection.tsx`, sekcja "Podgląd posta"). Oznaczone tym samym wzorcem co reszta apki: nowa flaga `FEATURE_FLAGS.postSzablonRelacji: true` w `apps/mobile/src/lib/featureFlags.ts`, badge `.badge-coming-soon` przy etykiecie + `disabled={FEATURE_FLAGS.postSzablonRelacji}` na `<select>` (wizualnie wyszarzone przez istniejącą regułę `.field select:disabled`).
+
+**Dokończone po wznowieniu (ten sam dzień):**
+- Build mobile miał 3 błędy typów odkryte dopiero teraz: `platforms.includes("instagram")`/`platform === "instagram"` porównywały string enum `SocialPlatform` z gołym literałem — `===` to toleruje, ale `.includes()` (Array<SocialPlatform>) już nie. Naprawione importem `SocialPlatform` jako wartości (nie tylko `type`) i użyciem `SocialPlatform.INSTAGRAM` we wszystkich miejscach. Build mobile przechodzi czysto.
+- Build backend: błąd `contentIdeaSet` nie istnieje na `PrismaClient` faktycznie był tym, na co wyglądał — Prisma Client nie został zregenerowany po dodaniu modelu w punkcie 8. `yarn prisma generate` (żadne `tsx watch` nie blokowało pliku tym razem, oba wcześniej wiszące procesy się nie odzywały) + `prisma migrate status` potwierdził, że migracja `ContentIdeaSet` już była zaaplikowana do bazy. Build backendu przechodzi czysto.
+- Zweryfikowane w przeglądarce przez Playwright (`demo@mizaly.local`, `/tworzenie?sekcja=post`): checkbox "Dodaj też do relacji na Instagramie" nie istnieje, gdy Instagram nie jest zaznaczony; pojawia się domyślnie zaznaczony po kliknięciu Instagrama; da się odznaczyć; znika po odznaczeniu platformy; wraca domyślnie zaznaczony po ponownym zaznaczeniu Instagrama. "Szablon posta" renderuje się wyszarzony (`disabled`) z badge'em "Wkrótce", identycznie jak inne pola coming-soon w tej sekcji. Zero błędów konsoli. Zrzuty ekranu potwierdzają wygląd.
+
+Wciąż otwarte:
+- [ ] **Nie przetestowana realna publikacja** z odznaczonym checkboxem (potwierdzić, że `addToStory: false` faktycznie dociera do backendu i relacja się nie tworzy) — wymaga podłączonego konta Instagram + prawdziwej publikacji przez Zernio, nieprzetestowane w tej sesji (tylko UI + logika frontu/backendu po stronie kodu).
+- [ ] Dwa równolegle wiszące procesy `tsx watch` backendu wciąż odkryte przy wznowieniu (ten sam objaw co w punkcie 8) — tylko jeden faktycznie trzyma port 4000, drugi to zombie. Nieposprzątane, nieszkodliwe, ale warto to ogarnąć przy najbliższej okazji restartu backendu.
+
+Kontekst: user kończył pracę na dziś (kończące się tokeny), poprosił o zapisanie stanu w backlogu z dzisiejszą datą; dokończone/zweryfikowane po wznowieniu tego samego dnia.
+
+## 11. Inspiracje: infinite-scroll osobno dla YouTube i Instagrama + zapamiętywanie pozycji scrolla per zakładka
+
+Zgłoszone przez usera (2026-07-17), nie zaimplementowane w tej sesji:
+
+Mechanizm automatycznego dociągania kart przy zjechaniu w dół (patrz punkt 9 — dziś zaimplementowany tylko dla `TrendsFeed.tsx`/Instagram, `PAGE_SIZE=10` + `IntersectionObserver`) powinien być wdrożony **osobno** dla YouTube (`YoutubeSection.tsx`) — dziś ten komponent renderuje całą listę filmów naraz, bez żadnej paginacji.
+
+Dodatkowo: przy przełączaniu się między zakładkami źródeł (Instagram/YouTube/Newsletter, `InspirationSourceBar.tsx`) strona powinna pamiętać, w którym miejscu (wysokość scrolla) user ostatnio był na danej zakładce, i wracać do tego miejsca przy powrocie na nią — **ale tylko jeśli już się na niej było**. Jeśli user wchodzi na zakładkę pierwszy raz w danej sesji (np. był tylko na Instagramie i teraz wchodzi na YouTube), ta nowa zakładka ma się otworzyć od góry, a nie odziedziczyć wysokość scrolla z poprzedniej zakładki.
+
+Checklist:
+- [ ] Dodać ten sam mechanizm paginacji/`IntersectionObserver` (wzorem `TrendsFeed.tsx`, patrz punkt 9) do `YoutubeSection.tsx` — dziś renderuje wszystkie filmy na raz.
+- [ ] Rozważyć, czy Newsletter (`NewsletterSection.tsx`) też potrzebuje tego samego mechanizmu, czy lista jest na tyle krótka, że to nieistotne — do potwierdzenia, ile newsletterów typowo jest na liście.
+- [ ] Zapamiętywanie pozycji scrolla per zakładka źródła (Instagram/YouTube/Newsletter) w `InspiracjePage.tsx` — np. mapa `Record<InspirationSource, number>` trzymana w state/ref, zapisywana przy zmianie `activeSource` (`onSourceChange`) i przywracana po przełączeniu.
+- [ ] Zakładka odwiedzona pierwszy raz w bieżącej sesji ma się otwierać od góry (scroll 0), nie dziedziczyć pozycji z poprzednio oglądanej zakładki — zapamiętywanie działa tylko dla zakładek, na których user faktycznie już był.
+- [ ] Ustalić, czy pozycja ma przetrwać tylko w ramach sesji (np. `useRef`/`useState` w `InspiracjePage.tsx`, znika po odświeżeniu strony), czy ma być trwała (np. `sessionStorage`) — nieprecyzowane przez usera, do potwierdzenia.
+
+## 12. Przenoszenie treści z IG: naprawa mediów lokalnych + status przeniesienia per platforma (2026-07-19)
+
+Zgłoszony przez usera bug: publikacja na TikTok z "Przenoszenie treści z IG" (dawniej "Przenoszenie kontentu" — zmieniona nazwa w UI i komentarzach na prośbę usera, żeby się mieściła w jednej linii) rzucała błąd Zernio "Invalid media URL ... points to a local or private network address".
+
+**Przyczyna i naprawa**: `lib/contentTransfer.ts` re-hostował zdjęcia/wideo do prywatnego bucketu Cloudflare R2 i serwował je przez własny backend (`${BACKEND_PUBLIC_URL}${path}`) — wzorzec skopiowany z Inspiracji, gdzie media są *tylko do wyświetlenia* (nigdy nie trafiają do Zernio, więc `localhost` jako `BACKEND_PUBLIC_URL` nie przeszkadza). Przenoszenie treści z IG odwrotnie — ten URL jest przekazywany do Zernio jako `mediaItems[].url`, więc musi być realnie osiągalny z serwerów Zernio, co nie działa lokalnie (domyślny `BACKEND_PUBLIC_URL=http://localhost:4000`).
+
+Naprawione: `lib/contentTransfer.ts` re-hostuje teraz przez Cloudinary (`fetchAsDataUrl` + `uploadMedia`, ten sam mechanizm co zwykłe zdjęcia posta w `routes/media.ts`) — URL zawsze jest prawdziwym publicznym linkiem CDN, niezależnie od tego, gdzie działa backend. Usunięty martwy kod: `routes/contentTransferMedia.ts` (proxy R2), jego mount w `index.ts`, `CONTENT_TRANSFER_MEDIA_ROUTE`/`CONTENT_TRANSFER_OBJECT_PREFIX`/`R2MediaSource` w `lib/r2Store.ts` (R2 zostaje tylko dla Inspiracji, jak było). Wyczyszczony jeden zcache'owany post z uszkodzonym `localhost` URL-em w bazie, żeby kolejne "Odśwież" pobrało go świeżo przez Cloudinary.
+
+**Niezwiązany drive-by, ale ta sama klasa bugu**: `lib/creatorAudit.ts` wciąż re-hostuje przez R2 + `BACKEND_PUBLIC_URL` do analizy OpenAI vision/transkrypcji — OpenAI też nie dosięgnie `localhost` lokalnie. Nie naprawione (user nie prosił), tylko odnotowane.
+
+**Nowa funkcja — status przeniesienia per platforma**: dodane pole `ContentTransferPost.transferredTo` (Prisma `Json?`, migracja `20260719171605_add_content_transfer_post_transferred_to`) — mapa `{ [platform]: ISO data }`, zapisywana przez `markContentTransferPostTransferred()` w `lib/contentTransfer.ts` zaraz po udanej publikacji przez Zernio (`routes/contentTransfer.ts`'s `/:id/publish`, merguje nie nadpisuje — publikacja na drugą platformę nie kasuje zapisu pierwszej). Frontend (`ContentTransferSection.tsx`) pokazuje przy każdej platformie badge "✓ Przeniesione {data}" jeśli już przesłane, i zmienia etykietę przycisku na "Prześlij ponownie" — nie blokuje ponownej wysyłki, tylko informuje. Śledzone lokalnie w naszej bazie (nie odpytywane z Zernio) — ta treść i tak jest już w naszej bazie, a Zernio nie ma pojęcia "to jest transfer posta IG X" do odpytania z powrotem.
+
+Typecheck + `vite build`/`tsc` (mobile/backend) przechodzą. **Nie zweryfikowane end-to-end w przeglądarce** (rzeczywista publikacja na platformę, wyświetlenie badge'a z poprawną datą, ponowna publikacja na tę samą platformę).
+
+Wciąż otwarte:
+- [ ] Zweryfikować cały przepływ end-to-end: odśwież → prześlij na platformę → sprawdź, czy badge "Przeniesione" pojawia się z poprawną datą, i czy ponowna wysyłka na tę samą platformę aktualizuje datę bez kasowania innych platform.
+- [ ] Rozważyć naprawienie `lib/creatorAudit.ts` tą samą metodą (Cloudinary zamiast R2+`BACKEND_PUBLIC_URL`), jeśli lokalne testowanie Audytu Twórcy kiedykolwiek na to natrafi.
+
+Kontekst: zgłoszone en passant, kontynuacja pracy nad Inspiracjami z tej samej sesji/dnia (patrz punkty 8-10 wyżej).
