@@ -1,34 +1,43 @@
 // Wspólne typy i enumy używane przez backend, mobile i admin.
 // Powinny odzwierciedlać model danych z docs/ROADMAP.md — przy zmianie schematu Prisma, zaktualizuj też ten plik.
 
-export enum ContentStatus {
-  DRAFT = "draft",
-  SCHEDULED = "scheduled",
-  PUBLISHED = "published",
-}
+// Plain const objects instead of TS `enum` - Railway's Node runtime strips
+// TypeScript types without a build step for this package (see package.json's
+// "main": "src/index.ts"), and real `enum` compiles to a runtime construct
+// that isn't erasable-only syntax, which crashes the backend on boot with
+// "TypeScript enum is not supported in strip-only mode". Call sites
+// (ContentStatus.DRAFT etc.) are unaffected.
+export const ContentStatus = {
+  DRAFT: "draft",
+  SCHEDULED: "scheduled",
+  PUBLISHED: "published",
+} as const;
+export type ContentStatus = (typeof ContentStatus)[keyof typeof ContentStatus];
 
-export enum SocialPlatform {
-  INSTAGRAM = "instagram",
-  TIKTOK = "tiktok",
-  YOUTUBE = "youtube",
-  X = "x",
-  LINKEDIN = "linkedin",
-  FACEBOOK = "facebook",
-  THREADS = "threads",
-  PINTEREST = "pinterest",
-  REDDIT = "reddit",
-  BLUESKY = "bluesky",
-  WHATSAPP = "whatsapp",
-  TELEGRAM = "telegram",
-  DISCORD = "discord",
-  SNAPCHAT = "snapchat",
-  GOOGLE_BUSINESS = "google_business",
-}
+export const SocialPlatform = {
+  INSTAGRAM: "instagram",
+  TIKTOK: "tiktok",
+  YOUTUBE: "youtube",
+  X: "x",
+  LINKEDIN: "linkedin",
+  FACEBOOK: "facebook",
+  THREADS: "threads",
+  PINTEREST: "pinterest",
+  REDDIT: "reddit",
+  BLUESKY: "bluesky",
+  WHATSAPP: "whatsapp",
+  TELEGRAM: "telegram",
+  DISCORD: "discord",
+  SNAPCHAT: "snapchat",
+  GOOGLE_BUSINESS: "google_business",
+} as const;
+export type SocialPlatform = (typeof SocialPlatform)[keyof typeof SocialPlatform];
 
-export enum UserRole {
-  OWNER = "owner",
-  MEMBER = "member",
-}
+export const UserRole = {
+  OWNER: "owner",
+  MEMBER: "member",
+} as const;
+export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
 export interface Organization {
   id: string;
