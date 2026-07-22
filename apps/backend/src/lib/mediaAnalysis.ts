@@ -48,6 +48,24 @@ export interface VideoTranscript {
   segments: TranscriptSegment[];
 }
 
+// Whisper is a known to hallucinate this exact credit line (and close
+// variants) on silent/near-silent audio - it was trained on a large corpus
+// of Amara.org-subtitled videos and reproduces the subtitle credit as if it
+// were spoken when there's nothing real to transcribe (see e.g.
+// github.com/openai/whisper/discussions/928). Segments matching this are
+// dropped rather than trusted as real content; if that empties the
+// transcript entirely, treat it the same as "no transcript".
+const WHISPER_HALLUCINATION_PATTERN = /amara\.org/i;
+
+function stripWhisperHallucinations(text: string, segments: TranscriptSegment[]): VideoTranscript | null {
+  const cleanSegments = segments.filter((s) => !WHISPER_HALLUCINATION_PATTERN.test(s.text));
+  if (cleanSegments.length === 0) {
+    return WHISPER_HALLUCINATION_PATTERN.test(text) ? null : { text, segments };
+  }
+  if (cleanSegments.length === segments.length) return { text, segments };
+  return { text: cleanSegments.map((s) => s.text).join(" ").trim(), segments: cleanSegments };
+}
+
 // Whisper hard-caps uploads at 25MB (26214400 bytes, per its own 413 error
 // message) - a Reel's raw MP4 buffer occasionally exceeds this (long/high-
 // bitrate video). Rather than give up with no transcript at all (client
@@ -122,7 +140,7 @@ export async function transcribeVideo(mediaUrl: string, postId: string): Promise
       end: s.end,
       text: s.text,
     }));
-    return { text: response.text, segments };
+    return stripWhisperHallucinations(response.text, segments);
   } catch (err) {
     console.error(`[media-analysis] Transcription failed for ${postId}:`, err);
     return null;
